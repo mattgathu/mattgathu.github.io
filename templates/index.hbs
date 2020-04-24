@@ -1,0 +1,25 @@
+{{#*inline "page"}}
+<header class="mt3 mt0-ns mb4-ns">
+  <div class="container flex flex-column flex-row-l justify-between-l">
+  </div>    
+  <div class="container flex flex-column flex-row-l justify-between-l">
+
+  </div>
+</header>
+
+<section id="posts" class="posts">
+   <div class="w-100 mw-none ph3 mw8-m mw9-l center f3">
+
+    <table class="post-list collapse w-100 f2-l f2-m f3-s">
+    {{#each blog.posts}}
+      <tr>
+        <td class="tr o-60 pr4 pr5-l bn">{{month_name month}}&nbsp;{{day}}&nbsp;{{year}}</td>
+        <td class="bn"><a href="/{{../blog.prefix}}{{url}}">{{title}}</a></td>
+      </tr>
+    {{/each}}
+    </table>
+
+  </div>
+</section>
+{{/inline}}
+{{~> (parent)~}}

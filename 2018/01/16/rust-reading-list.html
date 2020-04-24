@@ -1,0 +1,1139 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Rust 2018 Reading Journal | Matt Gathu</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="description" content="Matt Gathu's Blog">
+     <!-- Twitter card -->
+ <meta name="twitter:card" content="summary">
+ <meta name="twitter:site" content="@swissgathu">
+ <meta name="twitter:creator" content="@swissgathu">
+ <meta name="twitter:title" content="Rust 2018 Reading Journal | Matt Gathu">
+ <meta name="twitter:description" content="matt gathu blog">
+
+
+<!-- fonts -->
+
+
+<!-- styles -->
+<link rel="stylesheet" href="/styles/vendor.css"/>
+<link rel="stylesheet" href="/styles/fonts.css"/>
+<link rel="stylesheet" href="/styles/app.css"/>
+<link rel="stylesheet" href="/styles/highlight.css"/>
+
+<!-- favicon -->
+<link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16.png">
+<link rel="shortcut icon" href="/images/favicon.ico">
+<link rel="manifest" href="/images/site.webmanifest">
+<link rel="mask-icon" href="/images/safari-pinned-tab.svg" color="#5bbad5">
+<meta name="msapplication-TileColor" content="#00aba9">
+<meta name="theme-color" content="#ffffff">
+
+ <!-- atom -->
+ <link type="application/atom+xml" rel="alternate" href="https://mattgathu.github.io/feed.xml" title="Matt Gathu" />
+
+  </head>
+  <body>
+    <nav class="flex flex-row justify-center justify-end-l items-center flex-wrap ph2 pl3-ns pr4-ns">
+  <div class="brand flex-auto w-100 w-auto-l self-start tc tl-l">
+    <a href="/">
+      <span class="dib ml1 ml0-l">Matt Gathu</span>
+    </a>
+  </div>
+
+</nav>
+
+<section id="Rust 2018 Reading Journal" class="white">
+  <div class="w-100 mw-none ph3 mw8-m mw8-l center f3">
+    <header>
+      <h2>Rust 2018 Reading Journal</h2>
+      
+    </header>
+
+    <div class="publish-date-author">Jan. 16, 2018 &middot; Matt
+    </div>
+
+    <div class="post">
+      <ol>
+<li><a href="#jan-15-2018">Jan-15-2018 - Peeking inside Trait Objects</a></li>
+<li><a href="#jan-16-2018">Jan-16-2018 - What does Rust's &quot;Unsafe&quot; mean?</a></li>
+<li><a href="#jan-17-2018">Jan-17-2018 - What's Tokio and Async IO All About?</a></li>
+<li><a href="#jan-18-2018">Jan-18-2018 - A Journey into Iterators</a></li>
+<li><a href="#jan-19-2018">Jan-19-2018 - Error Handling in Rust</a></li>
+<li><a href="#jan-20-2018">Jan-20-2018 - Pretty State Machine Patterns in Rust</a></li>
+<li><a href="#jan-21-2018">Jan-21-2018 - Finding Closure in Rust</a></li>
+<li><a href="#jan-22-2018-1">Jan-22-2018 - Why is Rust difficult?</a></li>
+<li><a href="#jan-22-2018-2">Jan-22-2018 - Macros</a></li>
+<li><a href="#jan-23-2018">Jan-23-2018 - Macros in Rust pt1</a></li>
+<li><a href="#jan-24-2018">Jan-24-2018 - Macros in Rust pt2</a></li>
+<li><a href="#jan-25-2018">Jan-25-2018 - Macros in Rust pt3</a></li>
+<li><a href="#jan-26-2018">Jan-26-2018 - Macros in Rust pt4</a></li>
+<li><a href="#jan-27-2018">Jan-27-2018 - Virtual Structs Part 1 - Where Rust's enums shine</a></li>
+<li><a href="#jan-28-2018">Jan-28-2018 - Virtual Structs Part 2: Classes strike back</a></li>
+<li><a href="#jan-29-2018">Jan-29-2018 - Virtual Structs Part 3: Bringing Enums and Structs Together</a></li>
+<li><a href="#jan-30-2018">Jan-30-2018 - Taking Rust everywhere with rustup</a></li>
+<li><a href="#jan-31-2018">Jan-31-2018 - The Problem With Single-threaded Shared Mutability</a></li>
+<li><a href="#feb-01-2018">Feb-01-2018 - Rust Lifetimes for the Uninitialised</a></li>
+<li><a href="#feb-02-2018">Feb-02-2018 - What Are Sum, Product, and Pi Types?</a></li>
+<li><a href="#feb-03-2018">Feb-03-2018 - Mentally Modelling Modules</a></li>
+<li><a href="#feb-04-2018">Feb-04-2018 - Rust Tidbits: What Is a Lang Item?</a></li>
+<li><a href="#feb-15-2018">Feb-15-2018 - Some notes on Send and Sync</a></li>
+<li><a href="#feb-16-2018">Feb-16-2018 - The Option Type</a></li>
+<li><a href="#feb-19-2018">Feb-19-2018 - The Sized Trait</a></li>
+</ol>
+<h2><a href="#jan-15-2018" aria-hidden="true" class="anchor" id="jan-15-2018"></a>Jan-15-2018</h2>
+<p><strong>Title:</strong> <a href="http://huonw.github.io/blog/2015/01/peeking-inside-trait-objects/">Peeking inside Trait Objects</a></p>
+<p>Rust's trait system forms the basis of the generic system and polymorphic functions and
+types. Traits allow abstraction over behavior that types can have in common.</p>
+<p>Example</p>
+<pre><code class="language-rust">// trait definition
+trait Foo {
+    fn method(&amp;self) -&gt; String;
+}
+
+// implementation of trait Foo for type u8
+impl Foo for u8 {
+    fn method(&amp;self) -&gt; String { format!(&quot;u8: {}&quot;, *self) }
+}
+</code></pre>
+<p><strong>Trait objects</strong> are normal values that store a value of any type that implements a given trait,
+where the precise type can only be known at runtime.</p>
+<p>Trait objects are obtained by <strong>casting</strong> and <strong>coercions</strong>.</p>
+<p>Representation</p>
+<pre><code class="language-rust">pub struct TraitObject {
+    pub data: *mut (), // data pointer
+    pub vtable: *mut (), // vtable pointer
+}
+</code></pre>
+<p>The <strong>data pointer</strong> addresses the data that the trait object is storing, while the <strong>vtable pointer</strong>
+points to the virtual method table corresponding to the trait implementation.</p>
+<h2><a href="#jan-16-2018" aria-hidden="true" class="anchor" id="jan-16-2018"></a>Jan-16-2018</h2>
+<p><strong>Title:</strong> <a href="http://huonw.github.io/blog/2014/07/what-does-rusts-unsafe-mean/">What does Rust's &quot;Unsafe&quot; mean?</a></p>
+<p>Rust aims to be memory safe, so that code cannot crash due to dangling pointers or iterator
+invalidation. There are things that cannot fit the type system e.g. interaction with the OS and
+system libs. Rust fills these gaps using the <code>unsafe</code> keyword.</p>
+<p>There are two ways of opting into unsafe behavior: with an <code>unsafe</code> block or with an <code>unsafe</code>
+function</p>
+<pre><code class="language-rust">// calling some C functions imported via FFI
+unsafe fn foo() {
+    some_c_function();
+}
+fn bar() {
+    unsafe {
+        another_c_function();
+}
+</code></pre>
+<p>The <code>unsafe</code> context allows one to:</p>
+<ul>
+<li>call unsafe functions</li>
+<li>dereference raw pointers</li>
+<li>access a mutable global variable</li>
+<li>use inline assembly</li>
+</ul>
+<blockquote>
+<p>An <code>unsafe</code> context is the programmer telling the compiler that the code is guaranteed to be safe
+due to invariants impossible to express in the type system, and that it satisfies the
+<a href="https://doc.rust-lang.org/nightly/reference/behavior-considered-undefined.html">invariants that Rust itself imposes</a>.</p>
+</blockquote>
+<h2><a href="#jan-17-2018" aria-hidden="true" class="anchor" id="jan-17-2018"></a>Jan-17-2018</h2>
+<p><strong>Title:</strong> <a href="https://manishearth.github.io/blog/2018/01/10/whats-tokio-and-async-io-all-about/">What's Tokio and Async IO All About?</a></p>
+<p>One of Rust's key features if &quot;<strong>fearless concurrency</strong>&quot;. But the kind of concurrency required for
+handling a large amount of I/O bound tasks is absent from Rust.</p>
+<p>&quot;<em>Handling N things at once</em>&quot; is best done by using threads. However, OS threads do not scale when
+<strong>N</strong> is large: each thread needs to allocate a stack, setting up a thread involves a bunch of
+syscalls, and context switching is expensive. We need &quot;lighter&quot; threads.</p>
+<p>The Go language has lightweight threads, called &quot;<strong>goroutines</strong>&quot;. They are spawn using the <code>go</code>
+keyword.</p>
+<pre><code class="language-go">listener, err = net.Listen(...)
+// handle err
+for {
+    conn, err := listener.Accept()
+    // handle err
+
+    // spawn goroutine:
+    go handler(conn)
+}
+</code></pre>
+<p>This is a loop that waits for new TCP connections, and spawns a new goroutine to handle each connection.
+The spawned goroutine will shut down when <code>handler</code> finishes. The main loop keeps executing since
+it runs in a different goroutine.</p>
+<p>Go implements an <strong>M:N threading model</strong> with a scheduler that
+swaps goroutines in and out, much like the OS scheduler. Rust <em>used</em> to support lightweight threads
+pre-1.0 (feature got removed since it wasn't <em>zero cost</em>).</p>
+<p>Two building blocks of lightweight threading are <strong>Async I/O</strong> and <strong>futures</strong>.</p>
+<p>In regular blocking I/O, when you request I/O your thread will not be allowed to run until the
+operation is done. In Async (non-blocking) I/O a thread queues a request for I/O with the OS and
+continues execution. The I/O request is executed at some later point by the kernel. The OS provides
+system calls like <code>epoll</code> for Async I/O tasks.</p>
+<p>The Rust library <a href="https://github.com/carllerche/mio">mio</a> is a platform-agnostic wrapper around non-blocking I/O and interfaces
+such as epoll, kqueue etc. It forms a building block for Async I/O.</p>
+<p><strong>Futures</strong> are another building block. A Future is the promise of eventually having a value.
+Futures can be <code>wait</code>ed (blocking), <code>poll</code>ed and chained.</p>
+<p><strong><a href="https://github.com/tokio-rs/tokio-core">Tokio</a></strong> is a wrapper around mio that uses futures. It has a core event loop, and you feed it
+closures that return futures. The event loop schedules the tasks (closures) passed to it.</p>
+<p>Rust's code that has futures isn't elegant/pretty. <strong>Generators</strong> and the <strong>async/await</strong> syntax
+are experimental features aimed at reducing the boilerplate code, essentially
+turning</p>
+<pre><code class="language-rust">fn foo(...) -&gt; Future&lt;ReturnType, ErrorType&gt; {
+    do_io().and_then(|data| do_more_io(compute(data)))
+          .and_then(|more_data| do_even_more_io(more_compute(more_data)))
+    // ......
+}
+</code></pre>
+<p>to</p>
+<pre><code class="language-rust">#[async]
+fn foo(...) -&gt; Result&lt;ReturnType, ErrorType&gt; {
+    let data = await!(do_io());
+    let result = compute(data);
+    let more_data = await!(do_more_io());
+    // ....
+</code></pre>
+<h2><a href="#jan-18-2018" aria-hidden="true" class="anchor" id="jan-18-2018"></a>Jan-18-2018</h2>
+<p><strong>Title:</strong> <a href="https://hoverbear.org/2015/05/02/a-journey-into-iterators/">A Journey into Iterators</a></p>
+<p>Rust supports iterators. They are a fast, safe, lazy way of working with data structures, streams,
+and other more creative applications.</p>
+<p>A Rust iterator implements the <a href="https://doc.rust-lang.org/core/iter/index.html#traits"><code>Iterator</code></a> trait. There are also traits from conversion from
+and into iterators.</p>
+<p>Example</p>
+<pre><code class="language-rust">fn main() {
+    let input = [1, 2, 3]; // define a set of values
+    let iterator = input.iter(); // create an iterator over the them.
+    let mapped = iterator.map(|&amp;x| x * 2); // map iterator to a closure
+    let output = mapped.collect::&lt;Vec&lt;usize&gt;&gt;(); // convert iterator into a collection
+    println!(&quot;{:?}&quot;, output);
+}
+</code></pre>
+<p>Iterators provide convenient methods such as <code>.next()</code> for single element iteration, <code>.take(n)</code> for
+a batch pick and <code>.skip(n)</code> for discarding <code>n</code> elements.</p>
+<p>Many of Rust's collection data structures support iterators e.g. Vectors, VecDeques, HashMaps.</p>
+<p>Writing an iterator simply means implementing the <code>Iterator</code> trait.</p>
+<pre><code class="language-rust">struct CountUp {
+    current: usize,
+}
+
+impl Iterator for CountUp {
+    type Item = usize;
+    // The only fn we need to provide for a basic iterator.
+    fn next(&amp;mut self) -&gt; Option&lt;usize&gt; {
+        self.current += 1;
+        Some(self.current)
+    }
+}
+</code></pre>
+<p>Rust's ranges also implement the <code>Iterator</code> traits.</p>
+<p>Iterators can be merged, chained, even split into other iterators. They can also be <code>filter</code>ed and
+<code>fold</code>ed.</p>
+<pre><code class="language-rust">fn main() {
+	let input = 1..10;
+	let output = input
+    	.filter(|&amp;item| item % 2 == 0) // Keep Evens
+    	.map(|item| item * 2) // Multiply by two.
+    	.fold(0, |accumulator, item| accumulator + item);
+	println!(&quot;{}&quot;, output);
+}
+</code></pre>
+<p>Check out <a href="https://doc.rust-lang.org/beta/std/collections/"><strong><code>std::collections</code></strong></a> and <a href="https://doc.rust-lang.org/beta/std/iter/"><strong><code>std::iter</code></strong></a></p>
+<h2><a href="#jan-19-2018" aria-hidden="true" class="anchor" id="jan-19-2018"></a>Jan-19-2018</h2>
+<p><strong>Title:</strong> <a href="http://blog.burntsushi.net/rust-error-handling/">Error Handling in Rust</a></p>
+<p>Error handling is divided into two broad categories: exceptions and return values. Error handling
+in Rust is implemented via return values.</p>
+<p>To <code>unwrap</code> something is to say, &quot;Gimme the result, else just panic and stop execution&quot;. The
+<code>Option</code> and <code>Result</code> types implement the <code>unwrap</code> method.</p>
+<p>The <code>Option</code> type is a way to use Rust's type system to express the <strong>possibility of absence</strong>.</p>
+<pre><code class="language-rust">enum Option&lt;T&gt; {
+    None,
+    Some(T),
+}
+</code></pre>
+<p>Case analysis (through <a href="https://doc.rust-lang.org/book/second-edition/ch18-03-pattern-syntax.html">pattern matching</a>) is used to get the value stored inside an
+<code>Option&lt;T&gt;</code>. The <code>unwrap</code> method abstracts away the case analysis.</p>
+<p>The <code>Option</code> trait defines combinators that are useful in get rid of case analysis. A great example
+is <code>map</code> that maps a closure to the value inside of an <code>Option&lt;T&gt;</code></p>
+<pre><code class="language-rust">let maybe_some_string = Some(String::from(&quot;Hello, World!&quot;));
+let maybe_some_len = maybe_some_string.map(|s| s.len());
+assert_eq!(maybe_some_len, Some(13));
+</code></pre>
+<p>The <code>unwrap_or</code> combinator is useful for providing a default value when an <code>Option</code> value is
+<code>None</code>.</p>
+<pre><code class="language-rust">pub fn unwrap_or(self, def: T) -&gt; T {
+        match self {
+            Some(x) =&gt; x,
+            None =&gt; def,
+        }
+}
+</code></pre>
+<p>The <code>and_then</code> combinator makes is to compose distinct computations, essentially by chaining.</p>
+<pre><code class="language-rust">fn square(x: u32) -&gt; Option&lt;u32&gt; { Some(x * x) }
+assert_eq!(Some(2).and_then(square).and_then(square), Some(16));
+</code></pre>
+<p>The <code>Result</code> type is a richer version of <code>Option</code>. It expresses the <strong>possibility of error</strong>.</p>
+<pre><code class="language-rust">enum Result&lt;T, E&gt; {
+   Ok(T),
+   Err(E),
+}
+</code></pre>
+<p>Just like <code>Option</code>, <code>Result</code> implements lots of combinators including <code>map</code>, <code>map_err</code>, <code>unwrap_or</code>
+and <code>and_then</code>. The <code>Result</code> type also supports aliases when dealing with many references to one
+<code>Result</code>. A common alias is <code>io::Result</code>.</p>
+<pre><code class="language-rust">pub type Result&lt;T&gt; = result::Result&lt;T, Error&gt;;
+</code></pre>
+<p>Multiple errors can be handled by having a custom <code>enum</code> to represent <strong>one of many
+possibilities</strong>.</p>
+<pre><code class="language-rust">#[derive(Debug)]
+enum CliError {
+    Io(io::Error),
+    Parse(num::ParseIntError),
+}
+</code></pre>
+<p>The standard library defines two traits for error handing: <code>std::error::Error</code> and
+<code>std::convert::From</code>. The first one for describing errors and the latter for conversion.</p>
+<pre><code class="language-rust">impl From&lt;io::Error&gt; for CliError {
+    fn from(err: io::Error) -&gt; CliError {
+        CliError::Io(err)
+    }
+}
+</code></pre>
+<p>The <a href="https://doc.rust-lang.org/std/macro.try.html"><code>try!</code></a> macro is useful for encapsulating case analysis, control flow and error type
+conversion.</p>
+<h2><a href="#jan-20-2018" aria-hidden="true" class="anchor" id="jan-20-2018"></a>Jan-20-2018</h2>
+<p><strong>Title:</strong> <a href="https://hoverbear.org/2016/10/12/rust-state-machine-pattern/">Pretty State Machine Patterns in Rust</a></p>
+<p>A State Machine is any <strong>machine</strong> which has a set of <strong>states</strong> and <strong>transitions</strong> defined between them.
+When we talk about a machine we’re referring to the abstract concept of something which does something.</p>
+<p>States are a way to reason about where a machine is in its process. For example, we can think about a
+bottle filling machine. The machine is in a <strong>waiting</strong> state when it is waiting for a
+new bottle. Once it detects a bottle it moves to the <strong>filling</strong> state. Upon detecting the bottle is
+filled it enters the <strong>done</strong> state. After the bottle has left the machine we return to the <strong>waiting</strong> state.</p>
+<pre><code>  +---------+   +---------+   +------+
+  |         |   |         |   |      |
+  | Waiting +--&gt;+ Filling +--&gt;+ Done |
+  |         |   |         |   |      |
+  +----+----+   +---------+   +--+---+
+       ^                         |
+       +-------------------------+
+</code></pre>
+<p>When designing a state machine in Rust, we ideally want these characteristics:</p>
+<ul>
+<li>Can only be in one state at a time.</li>
+<li>Each state should able have its own associated values if required.</li>
+<li>Transitioning between states should have well defined semantics.</li>
+<li>It should be possible to have some level of shared state.</li>
+<li>Only explicitly defined transitions should be permitted.</li>
+<li>Changing from one state to another should consume the state so it can no longer be used.</li>
+<li>We shouldn't need to allocate memory for all states.</li>
+<li>Any error messages should be easy to understand.</li>
+<li>We shouldn't need to resort to heap allocations to do this.</li>
+<li>The type system should be harnessed to our greatest ability.</li>
+<li>As many errors as possible should be at compile-time.</li>
+</ul>
+<p>An approach to achieve is use a combination of generics, <code>enum</code>s and shared values.</p>
+<pre><code class="language-rust">fn main() {
+    let mut the_factory = Factory::new();
+    the_factory.bottle_filling_machine = the_factory.bottle_filling_machine.step();
+}
+
+// This is our state machine for our Bottle Filling Machine
+struct BFM&lt;S&gt; {
+    shared_value: usize,
+    state: S
+}
+
+// The following states can be the 'S' in StateMachine&lt;S&gt;
+struct Waiting {
+    waiting_time: std::time::Duration,
+}
+
+struct Filling {
+    rate: usize,
+}
+
+struct Done;
+
+// Our Machine starts in the 'Waiting' state.
+impl BFM&lt;Waiting&gt; {
+    fn new(shared_value: usize) -&gt; Self {
+        BFM {
+            shared_value: shared_value,
+            state: Waiting {
+                waiting_time: std::time::Duration::new(0, 0),
+            }
+        }
+    }
+}
+
+// The following are the defined transitions between states.
+impl From&lt;BFM&lt;Waiting&gt;&gt; for BFM&lt;Filling&gt; {
+    fn from(val: BFM&lt;Waiting&gt;) -&gt; BFM&lt;Filling&gt; {
+        BFM {
+            shared_value: val.shared_value,
+            state: Filling {
+                rate: 1,
+            }
+        }
+    }
+}
+
+impl From&lt;BFM&lt;Filling&gt;&gt; for BFM&lt;Done&gt; {
+    fn from(val: BFM&lt;Filling&gt;) -&gt; BFM&lt;Done&gt; {
+        BFM {
+            shared_value: val.shared_value,
+            state: Done,
+        }
+    }
+}
+
+impl From&lt;BFM&lt;Done&gt;&gt; for BFM&lt;Waiting&gt; {
+    fn from(val: BFM&lt;Done&gt;) -&gt; BFM&lt;Waiting&gt; {
+        BFM {
+            shared_value: val.shared_value,
+            state: Waiting {
+                waiting_time: std::time::Duration::new(0, 0),
+            }
+        }
+    }
+}
+
+
+// Here is we're building an enum so we can contain this state machine in a parent.
+enum MachineWrapper {
+    Waiting(BFM&lt;Waiting&gt;),
+    Filling(BFM&lt;Filling&gt;),
+    Done(BFM&lt;Done&gt;),
+}
+
+// Defining a function which shifts the state along.
+impl MachineWrapper {
+    fn step(mut self) -&gt; Self {
+        self = match self {
+            MachineWrapper::Waiting(val) =&gt; MachineWrapper::Filling(val.into()),
+            MachineWrapper::Filling(val) =&gt; MachineWrapper::Done(val.into()),
+            MachineWrapper::Done(val) =&gt; MachineWrapper::Waiting(val.into()),
+        };
+        self
+    }
+}
+
+// The structure with a parent.
+struct Factory {
+    bottle_filling_machine: MachineWrapper,
+}
+
+impl Factory {
+    fn new() -&gt; Self {
+        Factory {
+            bottle_filling_machine: MachineWrapper::Waiting(BFM::new(0)),
+        }
+    }
+}
+</code></pre>
+<h2><a href="#jan-21-2018" aria-hidden="true" class="anchor" id="jan-21-2018"></a>Jan-21-2018</h2>
+<p><strong>Title:</strong> <a href="http://huonw.github.io/blog/2015/05/finding-closure-in-rust/">Finding Closure in Rust</a></p>
+<p>A <strong>closure</strong> is a function that can directly use variables from the scope in which it is defined.
+This is often described as the closure <em>closing over</em> or <em>capturing</em> variables.</p>
+<p>Rust has C++11 inspired closures using the trait system, allowing for:</p>
+<ul>
+<li>allocation-less statically dispatched closures</li>
+<li>choice to opt-in to type-erasure and dynamic dispatch</li>
+</ul>
+<p>Syntactically, a closure in Rust is an anonymous function value defined similar to Ruby, with
+pipes.</p>
+<pre><code class="language-rust">fn main() {
+    let mut v = [5, 4, 1, 3, 2];
+    v.sort_by(|a, b| a.cmp(b)); // closure `|arguments...| body`
+    assert!(v == [1, 2, 3, 4, 5]);
+}
+</code></pre>
+<p>How do closures work? The definition of <code>Option::map</code> (an example closure implementation) is:</p>
+<pre><code class="language-rust">impl&lt;X&gt; Option&lt;X&gt; {
+    pub fn map&lt;Y, F: FnOnce(X) -&gt; Y&gt;(self, f: F) -&gt; Option&lt;Y&gt; {
+        match self {
+            Some(x) =&gt; Some(f(x)),
+            None =&gt; None
+        }
+    }
+}
+</code></pre>
+<p>The <code>FnOnce</code> trait and its close cousins <code>Fn</code> and <code>FnMut</code> represent how the variables are captured by the
+closure:</p>
+<ul>
+<li><code>Fn</code>: <strong>by reference</strong></li>
+<li><code>FnMut</code>: <strong>by mutable reference</strong></li>
+<li><code>FnOnce</code>: <strong>by value</strong></li>
+</ul>
+<p>By default, the compiler looks at the closure body to see how captured variables are used, and uses
+that to infers how variables should be captured, that is deciding between <code>Fn</code>, <code>FnMut</code> and
+<code>FnOnce</code>.</p>
+<p>The <code>move</code> keyword is used to define an <strong>escaping</strong> closure, one that might leave the stack frame
+where it is created.</p>
+<pre><code class="language-rust">use std::thread;
+thread::spawn(move || {
+    // some work here
+    });
+</code></pre>
+<p>The use of traits for closures allows one to opt-in into dynamic dispatch via trait objects:</p>
+<pre><code class="language-rust">let mut closures: Vec&lt;Box&lt;Fn()&gt;&gt; = vec![];
+
+let text = &quot;second&quot;;
+
+closures.push(Box::new(|| println!(&quot;first&quot;)));
+closures.push(Box::new(|| println!(&quot;{}&quot;, text)));
+closures.push(Box::new(|| println!(&quot;third&quot;)));
+
+for f in &amp;closures {
+    f(); // first / second / third
+}
+</code></pre>
+<h2><a href="#jan-22-2018-1" aria-hidden="true" class="anchor" id="jan-22-2018-1"></a>Jan-22-2018-1</h2>
+<p><strong>Title:</strong> <a href="https://vorner.github.io/difficult.html">Why is Rust difficult?</a></p>
+<p>Rust is considered difficult to learn by many people. However, it's not necessarily a bad thing if
+you get something in return for the investment.</p>
+<p>Rust aims to <strong>solve hard problems</strong>; it's therefore harder than languages that solve simpler problems,
+such as Lua.</p>
+<blockquote>
+<p>On the other hand, if you declare upfront that your language needs to be able to solve any hard
+problem anyone thinks of, run fast and be safe to use then you’ll probably get your wish, but
+it’ll hardly be simple.</p>
+</blockquote>
+<p>The Rust language is <strong>honest</strong>. It does not abstract away problems from the programmer; a beginner
+therefore has to grasp the complete complexity of the problem.</p>
+<p>Rust is <strong>different</strong>. Features such as ownership, traits and lifetimes makes Rust stand out from
+other languages.</p>
+<p>The compiler is very <strong>strict</strong>. The Rust compiler requires your code to be typed, memory safe and
+be free of data races. Even having dead code is an issue!</p>
+<blockquote>
+<p>But at the same time, it makes learning it a bit harder, because it insists on you learning
+everything needed to write a good program. An average is not acceptable.</p>
+</blockquote>
+<p>There is also a general <strong>perception</strong> that Rust is hard.</p>
+<p>Despite all this, it easy to quickly come up to speed, find the language interesting, become a
+better programmer (the compile is a strict teacher) and meet some very nice people in the
+community.</p>
+<h2><a href="#jan-22-2018-2" aria-hidden="true" class="anchor" id="jan-22-2018-2"></a>Jan-22-2018-2</h2>
+<p><strong>Title:</strong> <a href="https://www.ncameron.org/blog/macros/">Macros</a></p>
+<p>Macros are a syntactic language feature. A macro use is expanded according to a macro definition.
+They are like functions, however, their expansions happens entirely at compile time. In Rust this
+after the parsing step of compilation.</p>
+<p>Rust has a hygienic macro system - it preserves the scoping of the macro definition preventing
+shadowing of variables during macro expansion.</p>
+<p>Macros can be implemented as simple textual substitution, by manipulating tokens after lexing, or
+by manipulating the AST (Abstract Syntax Tree) after parsing. This also depends on how macros are
+defined. <code>macro_rules</code> in Rust allow for pattern matching of arguments in the macro definition.
+Rust macros are lexed into tokens before expansion and parsed afterwards.</p>
+<p>In a <strong>procedural macro system</strong>, a macro is defined as a program. When its use is encountered, the
+macro is executed with the macro arguments as input. The macro use is then replaced by the result
+of the execution.</p>
+<pre><code class="language-rust">proc_macro! foo(x) {  
+    let mut result = String::new();
+    for i in 0..10 {
+        result.push_str(x)
+    }
+    result
+}
+
+fn main() {  
+    let a = &quot;foo!(bar)&quot;; // Hand-waving about string literals.
+}
+</code></pre>
+<p>will expand to</p>
+<pre><code class="language-rust">fn main() {  
+    let a = &quot;barbarbarbarbarbarbarbarbarbar&quot;;
+}
+</code></pre>
+<blockquote>
+<p>A procedural macro is a generalisation of the syntactic macros described so far. One could imagine
+implementing a syntactic macro as a procedural macro by returning the text of the syntactic macro
+after manually substituting the arguments.</p>
+</blockquote>
+<h2><a href="#jan-23-2018" aria-hidden="true" class="anchor" id="jan-23-2018"></a>Jan-23-2018</h2>
+<p><strong>Title:</strong> <a href="https://www.ncameron.org/blog/macros-in-rust-pt1/">Macros in Rust pt1</a></p>
+<p>Rust offers an array of macro features:</p>
+<ul>
+<li><code>macro_rules!</code> macros</li>
+<li>procedural macros</li>
+<li>built-in macros such as <code>println!</code> and <code>#[derive()]</code></li>
+</ul>
+<p><code>macro_rules!</code> lets you write syntactic macros based on pattern matching. They are used in a
+function like style, the <code>!</code> distinguishes them from regular functions.</p>
+<pre><code class="language-rust">macro_rules! hello {  
+    () =&gt; { println!(&quot;hello world&quot;); }
+}
+
+fn main() {  
+    hello!();
+}
+</code></pre>
+<p>The above gets expanded into:</p>
+<pre><code class="language-rust">fn main() {  
+    println!(&quot;hello world&quot;);
+}
+</code></pre>
+<p>To illustrate pattern matching in macros:</p>
+<p>This code snippet</p>
+<pre><code class="language-rust">
+macro_rules! my_print {  
+    (foo &lt;&gt; $e: expr) =&gt; { println!(&quot;FOOOOOOOOOOOOoooooooooooooooooooo!! {}&quot;, $e); };
+    ($e: expr) =&gt; { println!(&quot;{}&quot;, $e); };
+    ($i: ident, $e: expr) =&gt; {
+        let $i = {
+            let a = $e;
+            println!(&quot;{}&quot;, a);
+            a
+        };
+    };
+}
+
+fn main() {  
+    my_print!(x, 30 + 12);
+    my_print!(&quot;hello!&quot;);
+    my_print!(foo &lt;&gt; &quot;hello!&quot;);
+}
+</code></pre>
+<p>Outputs</p>
+<pre><code>42
+hello!
+FOOOOOOOOOOOOoooooooooooooooooooo!! hello!
+</code></pre>
+<h2><a href="#jan-24-2018" aria-hidden="true" class="anchor" id="jan-24-2018"></a>Jan-24-2018</h2>
+<p><strong>Title:</strong> <a href="https://www.ncameron.org/blog/macros-in-rust-pt2/">Macros in Rust pt2</a></p>
+<p>Procedural macros are implemented using pure Rust code at the meta level. They are powerful since
+the output can be anything you can express as an Abstract Syntax Tree.</p>
+<p>At the moment procedural macros are used to write custom derive. They also need to be in their own
+crate of the <code>proc-macro</code> crate type.</p>
+<p>An example procedural macro implementation:</p>
+<pre><code class="language-rust">extern crate proc_macro;
+extern crate syn;
+#[macro_use]
+extern crate quote;
+
+use proc_macro::TokenStream;
+
+#[proc_macro_derive(HelloWorld)]
+pub fn hello_world(input: TokenStream) -&gt; TokenStream {
+    // Construct a string representation of the type definition
+    let s = input.to_string();
+    
+    // Parse the string representation
+    let ast = syn::parse_derive_input(&amp;s).unwrap();
+
+    // Build the impl
+    let gen = impl_hello_world(&amp;ast);
+    
+    // Return the generated impl
+    gen.parse().unwrap()
+}
+</code></pre>
+<p>The <a href="https://docs.rs/syn/0.12.10/syn/"><code>syn</code></a> and <a href="https://docs.rs/quote/0.4.2/quote/"><code>qoute</code></a> crates make it easier to write procedural macros.</p>
+<blockquote>
+<p>Syn is a parsing library for parsing a stream of Rust tokens into a syntax tree of Rust source code.</p>
+</blockquote>
+<p>The <code>qoute!</code> macro is used to turn Rust syntax tree data structures into tokens of source code.</p>
+<p>Error handling inside procedural macros is through the <code>panic!</code> macro.</p>
+<pre><code class="language-rust">fn impl_hello_world(ast: &amp;syn::DeriveInput) -&gt; quote::Tokens {
+    let name = &amp;ast.ident;
+    // Check if derive(HelloWorld) was specified for a struct
+    if let syn::Body::Struct(_) = ast.body {
+        // Yes, this is a struct
+        quote! {
+            impl HelloWorld for #name {
+                fn hello_world() {
+                    println!(&quot;Hello, World! My name is {}&quot;, stringify!(#name));
+                }
+            }
+        }
+    } else {
+        //Nope. This is an Enum. We cannot handle these!
+       panic!(&quot;#[derive(HelloWorld)] is only defined for structs, not for enums!&quot;);
+    }
+}
+</code></pre>
+<p>This post also borrows from the <a href="https://doc.rust-lang.org/book/first-edition/procedural-macros.html">rusk book</a></p>
+<h2><a href="#jan-25-2018" aria-hidden="true" class="anchor" id="jan-25-2018"></a>Jan-25-2018</h2>
+<p><strong>Title:</strong> <a href="https://ncameron.org/blog/macros-in-rust-pt3/">Macros in Rust pt3</a></p>
+<p>This post is about <strong>macro hygiene in Rust</strong></p>
+<p>A hygienic macro system preserves the scoping of a macro definition. The following examples
+illustrate that:</p>
+<pre><code class="language-rust">macro_rules! foo {  
+    () =&gt; {
+        let x = 0;
+    }
+}
+fn main() {  
+    let mut x = 42;
+    foo!();
+    println!(&quot;{}&quot;, x);
+}
+</code></pre>
+<p>The above code prints <code>42</code> as the output. Here the <code>x</code> defined in <code>main</code> and the one in <code>foo!</code> are
+disjoint.</p>
+<pre><code class="language-rust">macro_rules! foo {  
+    ($x: ident) =&gt; {
+        $x = 0;
+    }
+}
+fn main() {  
+    let mut x = 42;
+    foo!(x);
+    println!(&quot;{}&quot;, x);
+}
+</code></pre>
+<p>This prints <code>0</code>. <code>x</code> is passed in to the macro and then modified.</p>
+<p>Rust is hygienic with respect to variables scoping, labels, feature gates and stability checks.</p>
+<p>There are some limitations:</p>
+<ul>
+<li>hygiene only works on expression variables and labels.</li>
+<li>no hygiene is applied to lifetimes or type variables or types themselves.</li>
+<li>no hygiene with respect to privacy and safety i.e. in <code>unsafe</code> blocks.</li>
+</ul>
+<p>The implementation of hygienic macro system is a bit complex.
+Much of the work happens during the <strong>macro expansion</strong> and <strong>name resolution</strong> phases of Rust
+code compilation.</p>
+<p>The macro expansion phase is hygienic. During name resolution syntactic names are resolved into
+definitions. For unhygienic system, this resolutions is basically string equality. In Rust
+however, we consider identifiers(names) and a syntax context. To check if two identifiers are
+equal, they are resolved in the respective syntax contexts and the results compared.
+The syntax context is added to an identifier during the macro expansion phase.</p>
+<p>The macro hygiene algorithm used in Rust comes from the <a href="https://www.cs.utah.edu/plt/publications/jfp12-draft-fcdf.pdf">Macros That Work Together</a> paper. This
+mtwt algorithm is used during macro expansion. The whole syntax tree of a crate is walked,
+expanding macro uses and applying the algorithm to all identifiers.</p>
+<p>Mtwt has two key concepts - marking and renaming. Marking is applied when we expand a macro and
+renaming when we enter a new scope. A syntax context under mtwt consists of a series of marks and
+renames.</p>
+<h2><a href="#jan-26-2018" aria-hidden="true" class="anchor" id="jan-26-2018"></a>Jan-26-2018</h2>
+<p><strong>Title:</strong> <a href="https://ncameron.org/blog/macros-in-rust-pt4/">Macros in Rust pt4</a></p>
+<p>This post is about stuff around the import, export and modularisation of macros.</p>
+<p>The order of items matters for macros. You can only refer to a macro after it is declared.</p>
+<p>Macros defined inside a module cannot be used unless the module is annotated with <code>#[macro_use]</code>. Macros defined before and outside a module can be used without importation.</p>
+<p>Macros are encapsulated by crates - they must be explicitly imported and exported. When importing macros from a crate, you annotate <code>extern crate</code> with <code>#[macro_use]</code>.</p>
+<p>Program representations that matter in macros:</p>
+<ul>
+<li>source text</li>
+<li>token trees</li>
+<li>abstract syntax tree</li>
+</ul>
+<p><strong>Source text</strong> is the text passed to the compiler. It's stored in a codemap and is immutable. Once it's lexed, it hardly used by the compiler. It's main use is in error messages.</p>
+<p><strong>Lexing</strong> is the first stage of compilation where source text is transformed into <strong>tokens</strong>.</p>
+<p>Parsing a token tree gives an <strong>abstract syntax tree(AST)</strong>. An AST is a tree of nodes representing the source text in a concrete way.</p>
+<p>The three main phases of compilation are:</p>
+<ul>
+<li>parsing and expansion</li>
+<li>analysis, and</li>
+<li>code generation</li>
+</ul>
+<p><strong>libsyntax</strong> implements lexing, parsing and macro expansion. This is purely syntactic. The result of this is an AST. During lexing and parsing, macro use is left as is in the AST. The macro expansion phase walks the AST and performs substitutions while maintaining hygiene.</p>
+<p><strong>Spans</strong> (<em>a span identifies a section of code in the source text</em>)  are used to tracing macros in order to highlight source code in error messages. Due to the possibility of nested macros, the are also <strong>expansion traces</strong> table that holds a trace of each macro expansion.</p>
+<h2><a href="#jan-27-2018" aria-hidden="true" class="anchor" id="jan-27-2018"></a>Jan-27-2018</h2>
+<p><strong>Title:</strong> <a href="http://smallcultfollowing.com/babysteps/blog/2015/05/05/where-rusts-enum-shines/">Virtual Structs Part 1: Where Rust's enum shines</a></p>
+<p>This post is about why <strong>Rust enums are powerful.</strong></p>
+<p>Rust enums are more powerful compared to there equivalent in C++.
+The key difference between Rust and C++ is the size of the enum types. In Rust, the size of
+an enum instance is equal to <strong>the maximum of its variants</strong>, which means that we can pass
+enums around by value and know that we have enough space to store any variant of the enum.
+In contrast, when using classes in C++, the size of an enum instance will vary,
+<strong>depending on what specific variance it is</strong>. C++ requires passing around enums using a
+pointer, since we don't know how much space is need upfront.</p>
+<p>This flexibility makes it easy to extend Rust's enums with ease.</p>
+<pre><code class="language-rust">enum ErrorCode {
+    FileNotFound,
+    UnexpectedChar
+}
+</code></pre>
+<p>can be extended to</p>
+<pre><code class="language-rust">enum ErrorCode {
+    FileNotFound,
+    UnexpectedChar { expected: Vec&lt;String&gt;, found: char }
+}
+</code></pre>
+<p>In  C++ (or Java, Scala, etc) one would require some sort of class hierarchy (<em>more complex</em>) to achieve this.</p>
+<blockquote>
+<p><strong>Rust really relies deeply on the flat, uniform layout for enums</strong>. For example, every time you make
+a nullable pointer like <code>Option&lt;&amp;T&gt;</code>, you are taking advantage of the fact that options are laid out
+flat in memory, whether they are <code>None</code> or <code>Some</code>.</p>
+</blockquote>
+<h2><a href="#jan-28-2018" aria-hidden="true" class="anchor" id="jan-28-2018"></a>Jan-28-2018</h2>
+<p><strong>Title:</strong> <a href="http://smallcultfollowing.com/babysteps/blog/2015/05/29/classes-strike-back/">Virtual Structs Part 2: Classes strike back</a></p>
+<p>This post is about the <strong>shortcomings of enums</strong> in Rust, vs a class based approach.</p>
+<ul>
+<li><strong>Memory bloat</strong></li>
+</ul>
+<p>Enums have a size equal to their largest variant, this is sometimes a handicap. Avoid this memory
+bloat enum variants have to interned more so those with a lot of associated data. On the other hand
+a classes approach would allow exact memory size.</p>
+<ul>
+<li><strong>Common fields</strong></li>
+</ul>
+<p>To have common fields across enums variants requires having a struct wrapper around the enum to
+provide the shared fields. This doesn't feel natural. An class-based approach would simply have a
+base class containing the common fields that is inherited by the variants.</p>
+<ul>
+<li><strong>Initialization of common fields</strong></li>
+</ul>
+<p>If an enum has a lot of variants, being able to extract the common initialization code into a
+function is important.
+Since Rust lacks special constructors, there's no way to write a function that initializes only the
+common fields of the enum variants.
+C++ and Java use initialization based on constructors. This approach is problematic but it makes it
+helps abstract over the initialization of base class fields from subclass fields.</p>
+<ul>
+<li><strong>Refinement types</strong></li>
+</ul>
+<p>Rust currently lacks a way to &quot;refine&quot; the type of an enum to indicate the set of variants that it
+might be i.e. we can't make each variant its own type. Classes allow you to achieve this through
+inheritance.</p>
+<h2><a href="#jan-29-2018" aria-hidden="true" class="anchor" id="jan-29-2018"></a>Jan-29-2018</h2>
+<p><strong>Title:</strong> <a href="http://smallcultfollowing.com/babysteps/blog/2015/08/20/virtual-structs-part-3-bringing-enums-and-structs-together/">Virtual Structs Part 3: Bringing Enums and Structs Together</a></p>
+<p>This post is about a proposal of <strong>bridging enums and structs in Rust.</strong></p>
+<p>Enums and structs can be generalized into a single concept i.e. an algebraic data type. Enums can
+be interpreted into a tree or hierarchy. This idea can be thought of as <em>type hierarchy.</em></p>
+<p>The <code>Option</code> enum:</p>
+<pre><code class="language-rust">enum Option&lt;T&gt; {
+    Some(T), None
+}
+</code></pre>
+<p>can be represented as:</p>
+<pre><code>enum Option&lt;T&gt;
+|
++- struct None&lt;T&gt;
++- struct Some&lt;T&gt;
+</code></pre>
+<p>Enum declarations can also be extended with the ability to have fields as well as variants:</p>
+<pre><code class="language-rust">enum TypeData&lt;T&gt; {
+    // Common fields:
+    id: u32,
+    flags: u32,
+    ...,
+
+    // Variants:
+    Int { },
+    Uint { },
+    ...
+}
+</code></pre>
+<p>Enums can also be made unsized, allowing each value to be sized to a particular variant.</p>
+<blockquote>
+<p>One interesting question is whether we can concisely state conditions in which one would prefer to
+have “precise variant sizes” (class-like) vs “largest variant” (enum).
+I think the “precise sizes” approach is better when the following apply:</p>
+<ul>
+<li>A recursive type (like a tree), which tends to force boxing anyhow. Examples: the AST or types in the compiler, DOM in servo, a GUI.</li>
+<li>Instances never change what variant they are.</li>
+<li>Potentially wide variance in the sizes of the variants.</li>
+</ul>
+</blockquote>
+<p>It would also be great to use pattern matching as an elegant downcasting mechanism.</p>
+<p>Enums types can also be used as bounds - making them more capable and convenient.</p>
+<p>Enums could also have an associated struct type that can be used as a constructor allowing
+initialization of common fields.</p>
+<p>Finally enums could support subtyping and coercion - this is hard to get right.</p>
+<h2><a href="#jan-30-2018" aria-hidden="true" class="anchor" id="jan-30-2018"></a>Jan-30-2018</h2>
+<p><strong>Title:</strong> <a href="https://blog.rust-lang.org/2016/05/13/rustup.html">Taking Rust everywhere with rustup</a></p>
+<p><strong>Cross-compilation</strong> allows you to develop on one &quot;host&quot; platform, but get a final binary that
+runs on a different &quot;target&quot; platform. Rust aims to make this a no-brainer using rustup.</p>
+<blockquote>
+<p>At its heart, rustup is a toolchain manager for Rust. It can download and switch between copies
+of the Rust compiler and standard library for all supported platforms, and track Rust’s nightly,
+beta, and release channels, as well as specific versions.</p>
+</blockquote>
+<p>rustup's handy commands:</p>
+<ul>
+<li><strong>rustup install toolchain-name</strong>: allows you to install multiple toolchains eg <code>beta</code>, <code>nightly</code>
+and <code>stable</code>.</li>
+<li><strong>rustup show</strong>: shows the installed toolchains</li>
+<li><strong>rustup update</strong>: updates the toolchains to the latest versions.</li>
+<li><strong>rustup default</strong>: allows you to set the default toolchain</li>
+<li><strong>rustup target</strong>: allows you to add/remove a target to a toolchain</li>
+</ul>
+<h2><a href="#jan-31-2018" aria-hidden="true" class="anchor" id="jan-31-2018"></a>Jan-31-2018</h2>
+<p><strong>Title:</strong> <a href="https://manishearth.github.io/blog/2015/05/17/the-problem-with-shared-mutability/">The Problem With Single-threaded Shared Mutability</a></p>
+<p>This post is about Rust's choice to disallow having multiple mutable aliases to the same data.</p>
+<p>Rust uses a <strong>Read-Write lock</strong> pattern to prevent having multiple mutable aliases, the reasons for
+these are:</p>
+<ul>
+<li><strong>Prevent memory unsafety</strong></li>
+</ul>
+<p>Rust enums can cause segfaults with the RWLock pattern.</p>
+<pre><code class="language-rust">enum StringOrInt {
+    Str(String),
+    Int(i64)
+}
+
+let x = Str(&quot;Hi!&quot;.to_string()); 
+let y = &amp;mut x; 
+
+if let Str(ref insides) = x { 
+    *y = Int(1); 
+    println!(&quot;x says: {}&quot;, insides); 
+}
+</code></pre>
+<blockquote>
+<p>Here, we invalidated the insides reference because setting x to Int(1) meant that there is no longer a
+string inside it. However, insides is still a reference to a String, and the generated assembly would try
+to dereference the memory location where the pointer to the allocated string was, and probably end up trying
+to dereference 1 or some nearby data instead, and cause a segfault.</p>
+</blockquote>
+<ul>
+<li><strong>Prevent Iterator invalidation</strong></li>
+</ul>
+<pre><code class="language-rust">let buf = vec![1,2,3,4];
+
+for i in &amp;buf {
+    buf.push(i);
+}
+</code></pre>
+<p>Iterator invalidation involves consuming iterators whilst modifying their underlying dataset.
+The code snippet above would loop infinitely due to this. Rust prevents this from happening.</p>
+<p>Apart from infinite looping, reference invalidation would occur once the vector overflows its
+capacity and is reallocated.</p>
+<ul>
+<li><strong>Prevent data corruption/ race?</strong></li>
+</ul>
+<blockquote>
+<p>Aliasing with mutability in a sufficiently complex, single-threaded program is effectively the
+same thing as accessing data shared across multiple threads without a lock</p>
+</blockquote>
+<p>The above reasons make it possible to write safe abstractions, even for generic code.</p>
+<h2><a href="#feb-01-2018" aria-hidden="true" class="anchor" id="feb-01-2018"></a>Feb-01-2018</h2>
+<p><strong>Title:</strong> <a href="http://asquera.de/blog/2018-01-29/rust-lifetimes-for-the-uninitialised/">Rust Lifetimes for the Uninitialised</a></p>
+<p>This post is about <a href="https://doc.rust-lang.org/book/second-edition/ch10-03-lifetime-syntax.html">Lifetimes in Rust</a>.</p>
+<p>Ownership dictates that every piece of data is exclusively owned by another part of the program.
+Once ownership ends, the value is dropped. This gives us two points: introduction of the data into
+the program (initialisation) and removal (dropping). The interesting thing in Rust is that those two
+points are always clearly present. The range between those points is the region the binding and
+it's associated value is <em>alive</em>, its <em>lifetime</em>.</p>
+<p>Rust provides has <strong>lifetime elision</strong> that makes lifetime annotations unnecessary for common
+use cases.</p>
+<blockquote>
+<p>A common problem I see in trainings or the Hack &amp; Learn is that presented with a lifetime problem,
+people start messing around with lifetime syntax. This is often the wrong approach. It is always
+the wrong approach if you don't fully understand what the compiler calls you out on. It has
+probably found an issue you haven't thought about, making a borrow invalid.</p>
+</blockquote>
+<p>Explicit lifetimes are needed everywhere where situations are unclear, such as in
+<a href="https://doc.rust-lang.org/beta/std/primitive.str.html#method.split"><code>std::str.split</code></a> that iteratively hands out references to subslices of a string. Since
+<code>split</code> does not copy strings, lifetime annotations are required to ensure that the strings are not
+dropped while the iterator still exists.</p>
+<blockquote>
+<p>Remember the two golden rules:</p>
+<ul>
+<li>Don't fiddle with lifetime syntax until you understood what the compiler calls you out on</li>
+<li>Taking ownership (e.g. through cloning or using Box) isn't cheating</li>
+</ul>
+</blockquote>
+<h2><a href="#feb-02-2018" aria-hidden="true" class="anchor" id="feb-02-2018"></a>Feb-02-2018</h2>
+<p><strong>Title:</strong> <a href="https://manishearth.github.io/blog/2017/03/04/what-are-sum-product-and-pi-types/">What Are Sum, Product, and Pi Types?</a></p>
+<p>In its essence, a <strong>sum type</strong> is basically an <em>&quot;or&quot;</em> type. In Rust, they are <strong>enums</strong>.</p>
+<pre><code class="language-rust">enum Foo {
+    Str(String),
+    Bool(bool)
+}
+
+let foo = Foo::Bool(true);
+
+// &quot;pattern matching&quot;
+match foo {
+    Str(s) =&gt; /* do something with string `s` */,
+    Bool(b) =&gt; /* do something with bool `b` */,
+}
+</code></pre>
+<p>The are called sum types because they are the <em>sum</em> of the constituents types. In the above enum
+<code>Foo = String + bool</code>.</p>
+<p><strong>Product types</strong> are usually contain every possible combinations of elements of their constituent
+types.</p>
+<pre><code class="language-rust">
+struct Foo {
+    x: bool,
+    y: u8,
+}
+</code></pre>
+<p>The set of possible values of <code>Foo</code> is <code>{(x,y): x is a member of bool, y is a member of u8}</code> i.e. a
+<strong>cartesian product</strong>, often represented as <code>Foo = bool * u8</code>.</p>
+<p>What is a <strong>Pi type?</strong>.</p>
+<blockquote>
+<p>It’s essentially a form of dependent type. A dependent type is when your type can depend on a value.</p>
+</blockquote>
+<pre><code class="language-rust">// (the proposed rust syntax)
+fn make_array&lt;const x: u8&gt;() -&gt; Array&lt;bool, x&gt; {
+   // ... 
+}
+</code></pre>
+<p><code>make_array</code> is a function which can accept any integer and return a different type in each case.</p>
+<blockquote>
+<p>You can view it as a set of functions, where each function corresponds to a different integer input.</p>
+</blockquote>
+<pre><code class="language-rust">struct make_array {
+    make_array_0: fn() -&gt; Array&lt;bool, 0&gt;,
+    make_array_1: fn() -&gt; Array&lt;bool, 1&gt;,
+    make_array_2: fn() -&gt; Array&lt;bool, 2&gt;,
+    // ... 
+}
+</code></pre>
+<h2><a href="#feb-03-2018" aria-hidden="true" class="anchor" id="feb-03-2018"></a>Feb-03-2018</h2>
+<p><strong>Title:</strong> <a href="https://manishearth.github.io/blog/2017/05/14/mentally-modelling-modules/">Mentally Modelling Modules</a></p>
+<p>The module and import system in Rust is sometimes confusing to deal with, this post explains one
+right way of modelling it.</p>
+<p>Two rules for resolving confusion on how <strong>imports</strong> work:</p>
+<ul>
+<li><code>use foo::bar::baz</code> resolves <code>foo</code> relative to the root module <code>lib.rs</code> or <code>main.rs</code>
+<ul>
+<li>you can resolve relative to the current module by explicitly using <code>use self::foo::bar::baz</code></li>
+</ul>
+</li>
+<li><code>foo::bar::baz</code> within your code resolves <code>foo</code> relative to the current module.
+<ul>
+<li>you can resolve relative to the root by explicitly using <code>::foo::bar::baz</code></li>
+</ul>
+</li>
+</ul>
+<p>How the <strong>import system</strong> works can be summed up as:</p>
+<ul>
+<li><code>extern crate</code> and <code>use</code> will act as if they were defining the imported item in the current module, like a symbolic link</li>
+<li><code>use foo::bar::baz</code> resolves the path relative to the root module</li>
+<li><code>foo::bar::baz</code> in an inline path (i.e. not in a <code>use</code>) will resolve relative to the current module</li>
+<li><code>::foo::bar::baz</code> will always resolve relative to the root module</li>
+<li><code>self::foo::bar::baz</code> will always resolve relative to the current module</li>
+<li><code>super::foo::bar::baz</code> will always resolve relative to the parent module</li>
+</ul>
+<p>Basic rules on <strong>module privacy</strong>:</p>
+<ul>
+<li>If you can access a module, you can access all its public contents.</li>
+<li>A module can access its child modules, but not recursively.</li>
+<li>A child module can access its parent module (and it parents) and all their contents.</li>
+</ul>
+<h2><a href="#feb-04-2018" aria-hidden="true" class="anchor" id="feb-04-2018"></a>Feb-04-2018</h2>
+<p><strong>Title:</strong> <a href="https://manishearth.github.io/blog/2017/01/11/rust-tidbits-what-is-a-lang-item/">Rust Tidbits: What Is a Lang Item?</a></p>
+<blockquote>
+<p><strong>Lang items</strong> are a way for the stdlib (and libcore) to define types, traits, functions and other
+items which the complier needs to know about.</p>
+</blockquote>
+<blockquote>
+<p>The <code>rustc</code> compiler has certain pluggable operations, that is, functionality that isn't hard-coded into the language,
+but is implemented in libraries, with a special marker to tell the compiler it exists. The marker is the attribute
+<code>#[lang = &quot;...&quot;]</code> and there are various different values of ..., i.e. various different 'lang items'. <a href="https://doc.rust-lang.org/1.14.0/book/lang-items.html">docs link</a></p>
+</blockquote>
+<p>For example the expression <code>x + y</code> is desugared into <code>Add::add(x, y)</code> where the <code>Add</code> trait is
+marked as a lang item using <code>#[lang = &quot;add&quot;]</code>. The compiler can then call it whenever it encounters
+the addition operator.</p>
+<pre><code class="language-rust">#[lang = &quot;add&quot;]
+#[stable(feature = &quot;rust1&quot;, since = &quot;1.0.0&quot;)]
+pub trait Add&lt;RHS=Self&gt; {
+    ...
+}
+</code></pre>
+<p>Lang items are usually only required when you do an operation which needs them. Most lang items
+are use in the standard library and thus will be available in your program, such as the <code>add</code> item.</p>
+<p>Skipping the standard library using <code>#![no_std]</code> will usually trigger
+compiler errors about required lang items.</p>
+<pre><code class="language-rust">#![no_std]
+fn main() {
+ let x = 1 + 3;
+}
+</code></pre>
+<p>errors out with:</p>
+<pre><code>error: language item required, but not found: `panic_fmt`
+error: language item required, but not found: `eh_personality`
+</code></pre>
+<blockquote>
+<p>Basically, whenever the compiler needs to use special treatment with an item – whether it be
+dispatching calls to functions and trait methods in various situations, conferring special
+semantics to types/traits, or requiring traits to be implemented, the type will be defined
+in the standard library (libstd, libcore, or one of the crates behind the libstd façade),
+and marked as a lang item.</p>
+</blockquote>
+<h2><a href="#feb-15-2018" aria-hidden="true" class="anchor" id="feb-15-2018"></a>Feb-15-2018</h2>
+<p><strong>Title:</strong> <a href="https://huonw.github.io/blog/2015/02/some-notes-on-send-and-sync/">Some notes on Send and Sync</a></p>
+<p>There are two parts to Rust's support for concurrency:</p>
+<ul>
+<li>
+<p>ownership and lifetimes</p>
+</li>
+<li>
+<p>the <code>Send</code> and <code>Sync</code> traits</p>
+<blockquote>
+<p>These traits capture and control the two most common ways a piece of data be accessed and
+thrown around by threads, dictating whether it is safe to transfer ownership or pass a
+reference into another thread.</p>
+</blockquote>
+</li>
+</ul>
+<p>They are <strong>marker traits</strong> (<em>have no methods and inherently do not provide any functionality</em>) for
+certain invariants that types implementing them are expected to fulfill.</p>
+<p>These invariants are:</p>
+<ul>
+<li>if type <code>T</code> is <code>Send</code>, passing it by value to another thread should be safe.</li>
+<li>if type <code>T</code> is <code>Sync</code>, passing its reference <code>&amp;T</code> to another thread should be safe.</li>
+</ul>
+<blockquote>
+<p>These two traits enable a lot of useful concurrency and parallel patterns to be expressed while
+guaranteeing memory safety.</p>
+</blockquote>
+<p>If a type <code>T</code> implements both <code>Sync</code> and <code>Copy</code>, then it can also implement <code>Send</code>.</p>
+<p>Transferring a <code>&amp;mut T</code> between threads is guaranteed to be safe if <code>T</code> implements <code>Send</code>.</p>
+<h2><a href="#feb-16-2018" aria-hidden="true" class="anchor" id="feb-16-2018"></a>Feb-16-2018</h2>
+<p><strong>Title:</strong> <a href="https://8thlight.com/blog/dave-torre/2015/03/11/the-option-type.html">The Option Type</a></p>
+<blockquote>
+<p>Optional types are basically compiler-enforced null-checks. If a method returns an Option,
+any caller of that method must deal with it in some way or the code won't compile.
+As a bonus, the Option type in the method's signature is a dead giveaway to developers
+that the method may return null.</p>
+</blockquote>
+<pre><code class="language-rust">fn get_shortest(names: Vec&lt;&amp;str&gt;) -&gt; Option&lt;&amp;str&gt; {
+    if names.len() &gt; 0 {
+        let mut shortest = names[0];
+        for name in names.iter() {
+            if name.len() &lt; shortest.len() {
+                shortest = *name;
+            }
+        }
+        Some(shortest)
+    } else {
+        None
+    }
+}
+</code></pre>
+<p>The function above returns an <code>Option</code> which encloses either a String or None.
+To get the enclosed String from the Option, we use its <code>unwrap</code> method; this will however panic if
+None is received.</p>
+<p>A better way is to use a <code>match</code> statement for unwrapping:</p>
+<pre><code class="language-rust">fn do_calculation(names: Vec&lt;&amp;str&gt;) -&gt; f64 {
+    match get_shortest(names) {
+        Some(x) =&gt; x.len() as f64 * std::f64::consts::PI,
+        None    =&gt; // handle the null case here
+    }
+}
+</code></pre>
+<blockquote>
+<p>... optionals are a nice tool to have. They communicate that a null return is possible,
+and force developers to handle that possibility one way or another.</p>
+</blockquote>
+<h2><a href="#feb-19-2018" aria-hidden="true" class="anchor" id="feb-19-2018"></a>Feb-19-2018</h2>
+<p><strong>Title:</strong> <a href="http://huonw.github.io/blog/2015/01/the-sized-trait/">The Sized Trait</a></p>
+<p><code>Sized</code> is a marker trait that is automatically implemented. A type is considered sized if the
+precise size of a value of type is known and fixed at compile time once the real types of the type
+parameters are known i.e. after monomorphisation.</p>
+<p>For example <code>u8</code> is one byte and <code>Vec&lt;T&gt;</code> is 12 or 24 bytes (32 vs 64 bit platforms).</p>
+<p>Unsized types are known as dynamically sized types (DSTs) and include <code>Trait</code>s and slices <code>[T]</code>.
+A slice represents an unknown number of <code>T</code>s contiguous in memory. A <code>Trait</code> represents a value of
+any type that implements <code>Trait</code> and these have varying sizes.</p>
+<p>Unsized values must always be behind a pointer: <code>&amp;[T]</code> or <code>Box&lt;Trait&gt;</code>. The pointer has the info
+required to compute the size.</p>
+<p>Sized types have more flexibility - compiler can manipulate them directly. Having an unsized type
+behind a pointer effectively makes it sized - size of the pointer.</p>
+<p>Since <code>Sized</code> is bound for type parameters by default, a special syntax <code>?Sized</code> is used to
+opt-out.</p>
+<blockquote>
+<p>This unusual decision was chosen because of the increased flexibility of sized types, and some
+data (which I now can’t find in the issue tracker) which indicated that most type parameters
+needed to be sized.</p>
+</blockquote>
+
+    </div>
+  </div>
+</section>
+
+    
+<!-- scripts -->
+<script src="/scripts/highlight.js"></script>
+
+  </body>
+</html>

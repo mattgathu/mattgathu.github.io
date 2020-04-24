@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Rust Compiler Lints | Matt Gathu</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="description" content="Matt Gathu's Blog">
+     <!-- Twitter card -->
+ <meta name="twitter:card" content="summary">
+ <meta name="twitter:site" content="@swissgathu">
+ <meta name="twitter:creator" content="@swissgathu">
+ <meta name="twitter:title" content="Rust Compiler Lints | Matt Gathu">
+ <meta name="twitter:description" content="matt gathu blog">
+
+
+<!-- fonts -->
+
+
+<!-- styles -->
+<link rel="stylesheet" href="/styles/vendor.css"/>
+<link rel="stylesheet" href="/styles/fonts.css"/>
+<link rel="stylesheet" href="/styles/app.css"/>
+<link rel="stylesheet" href="/styles/highlight.css"/>
+
+<!-- favicon -->
+<link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16.png">
+<link rel="shortcut icon" href="/images/favicon.ico">
+<link rel="manifest" href="/images/site.webmanifest">
+<link rel="mask-icon" href="/images/safari-pinned-tab.svg" color="#5bbad5">
+<meta name="msapplication-TileColor" content="#00aba9">
+<meta name="theme-color" content="#ffffff">
+
+ <!-- atom -->
+ <link type="application/atom+xml" rel="alternate" href="https://mattgathu.github.io/feed.xml" title="Matt Gathu" />
+
+  </head>
+  <body>
+    <nav class="flex flex-row justify-center justify-end-l items-center flex-wrap ph2 pl3-ns pr4-ns">
+  <div class="brand flex-auto w-100 w-auto-l self-start tc tl-l">
+    <a href="/">
+      <span class="dib ml1 ml0-l">Matt Gathu</span>
+    </a>
+  </div>
+
+</nav>
+
+<section id="Rust Compiler Lints" class="white">
+  <div class="w-100 mw-none ph3 mw8-m mw8-l center f3">
+    <header>
+      <h2>Rust Compiler Lints</h2>
+      
+    </header>
+
+    <div class="publish-date-author">Jan. 16, 2019 &middot; Matt
+    </div>
+
+    <div class="post">
+      <h2><a href="#what" aria-hidden="true" class="anchor" id="what"></a>What</h2>
+<p>The Rust compiler allows to enable or disable various lints during code compilation. This
+is a short overview of these lints.</p>
+<p><strong>TLDR:</strong> The quickest way to discover these lints is to have the compiler list them.</p>
+<pre><code class="language-shell">$ rustc -W help
+</code></pre>
+<h2><a href="#why" aria-hidden="true" class="anchor" id="why"></a>Why</h2>
+<p>Lints are useful for various use cases:</p>
+<ul>
+<li>preventing bugs by catching common gotchas such as unused variables.</li>
+<li>enforcing coding standards such as having documentation.</li>
+<li>relaxing compiler defaults that might not fit your use case e.g. allowing use of CamelCase</li>
+</ul>
+<p>The above list is not exhaustive but gives an ideas of where linting is applicable.</p>
+<h2><a href="#how" aria-hidden="true" class="anchor" id="how"></a>How</h2>
+<p>The Rust compiler lints are categorised into four levels:</p>
+<ul>
+<li>allow</li>
+<li>warn</li>
+<li>deny</li>
+<li>forbid</li>
+</ul>
+<p>These are pretty self-explanatory. The compiler with either stay silent, issue an warning or throw
+an error. The extra <code>forbid</code> level is same as deny but cannot be overridden.</p>
+<p>How do you configure these lint levels? There are a couple of ways:</p>
+<ul>
+<li>
+<p><strong>via compiler flags</strong></p>
+<p>Running <code>rustc -W help</code> on your terminal will, among other things, show you how to set lint
+levels:</p>
+<pre><code class="language-shell">Available lint options:
+-W &lt;foo&gt;           Warn about &lt;foo&gt;
+-A &lt;foo&gt;           Allow &lt;foo&gt;
+-D &lt;foo&gt;           Deny &lt;foo&gt;
+-F &lt;foo&gt;           Forbid &lt;foo&gt; (deny &lt;foo&gt; and all attempts to override)
+</code></pre>
+</li>
+<li>
+<p><strong>via attributes</strong></p>
+<p>You can also have attributes, such as <code>#![warn(missing_docs)]</code>, in your <code>lib.rs</code> file.</p>
+</li>
+</ul>
+<p>The compiler can also set the maximum level of all lints using the <code>--cap-lints</code> flag. e.g.</p>
+<pre><code class="language-shell">$ rustc --cap-lints warn
+</code></pre>
+<p>There is a list of lints that the compiler allows, warns and denies by default. The help command
+<code>rustc -W help</code> lists out all lints with their corresponding default level.</p>
+<h2><a href="#reference" aria-hidden="true" class="anchor" id="reference"></a>Reference</h2>
+<ul>
+<li><a href="https://doc.rust-lang.org/rustc/lints/index.html">https://doc.rust-lang.org/rustc/lints/index.html</a></li>
+</ul>
+
+    </div>
+  </div>
+</section>
+
+    
+<!-- scripts -->
+<script src="/scripts/highlight.js"></script>
+
+  </body>
+</html>

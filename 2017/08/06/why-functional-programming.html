@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Why Functional Programming Matters (paper review) | Matt Gathu</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="description" content="Matt Gathu's Blog">
+     <!-- Twitter card -->
+ <meta name="twitter:card" content="summary">
+ <meta name="twitter:site" content="@swissgathu">
+ <meta name="twitter:creator" content="@swissgathu">
+ <meta name="twitter:title" content="Why Functional Programming Matters (paper review) | Matt Gathu">
+ <meta name="twitter:description" content="matt gathu blog">
+
+
+<!-- fonts -->
+
+
+<!-- styles -->
+<link rel="stylesheet" href="/styles/vendor.css"/>
+<link rel="stylesheet" href="/styles/fonts.css"/>
+<link rel="stylesheet" href="/styles/app.css"/>
+<link rel="stylesheet" href="/styles/highlight.css"/>
+
+<!-- favicon -->
+<link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16.png">
+<link rel="shortcut icon" href="/images/favicon.ico">
+<link rel="manifest" href="/images/site.webmanifest">
+<link rel="mask-icon" href="/images/safari-pinned-tab.svg" color="#5bbad5">
+<meta name="msapplication-TileColor" content="#00aba9">
+<meta name="theme-color" content="#ffffff">
+
+ <!-- atom -->
+ <link type="application/atom+xml" rel="alternate" href="https://mattgathu.github.io/feed.xml" title="Matt Gathu" />
+
+  </head>
+  <body>
+    <nav class="flex flex-row justify-center justify-end-l items-center flex-wrap ph2 pl3-ns pr4-ns">
+  <div class="brand flex-auto w-100 w-auto-l self-start tc tl-l">
+    <a href="/">
+      <span class="dib ml1 ml0-l">Matt Gathu</span>
+    </a>
+  </div>
+
+</nav>
+
+<section id="Why Functional Programming Matters (paper review)" class="white">
+  <div class="w-100 mw-none ph3 mw8-m mw8-l center f3">
+    <header>
+      <h2>Why Functional Programming Matters (paper review)</h2>
+      
+    </header>
+
+    <div class="publish-date-author">Aug. 6, 2017 &middot; Matt
+    </div>
+
+    <div class="post">
+      <p><img src="https://imgs.xkcd.com/comics/functional.png" alt="functional-love" /></p>
+<h2><a href="#what" aria-hidden="true" class="anchor" id="what"></a>What</h2>
+<blockquote>
+<p>In this paper we show that two features of
+functional languages in particular, higher-order functions and lazy evaluation,
+can contribute greatly to modularity. ~ John Hughes</p>
+</blockquote>
+<p>Modular Programming is a key technique in successful software design and all major programming
+languages have a notion of component based engineering.
+Functional programming has contributed a lot in enhancing modular software design by providing
+features such as high order functions and lazy evaluation that have pushed back on the conceptual
+limits of conventional languages on the ways problems can be modularised.</p>
+<p><a href="https://github.com/papers-we-love/papers-we-love/blob/master/paradigms/functional_programming/why-functional-programming-matters.pdf">&quot;Why Functional Programming Matters&quot;</a>
+is a late 80s paper by John Hughes that portrays the
+importance of functional programming moreso where modularisation is key:</p>
+<blockquote>
+<p>This paper is an attempt to demonstrate to the “real world” that functional
+programming is vitally important, and also to help functional programmers
+exploit its advantages to the full by making it clear what those advantages are.</p>
+</blockquote>
+<h2><a href="#why" aria-hidden="true" class="anchor" id="why"></a>Why</h2>
+<p><img src="https://imgs.xkcd.com/comics/haskell.png" alt="haskell" /></p>
+<blockquote>
+<p>Such a catalogue of “advantages” is all very well, but one must not be surprised
+if outsiders don’t take it too seriously. It says a lot about what functional
+programming is not (it has no assignment, no side effects, no flow of control) but
+not much about what it is.</p>
+</blockquote>
+<p>Perhaps the biggest motivation for this paper could have been to provide an adequate characterisation of
+functional programming and argue that it supports the development of reusable software
+way better than conventional programming paradigms.</p>
+<p>Hughes gives a great analogy of functional programming with structured programming, and shows how FP
+strives beyond structured programming by enabling greater modularity and supporting <em>&quot;programming in
+the large&quot;</em></p>
+<blockquote>
+<p>It is helpful to draw an analogy between functional and structured programming.
+In the past, the characteristics and advantages of structured programming have
+been summed up more or less as follows. Structured programs contain no goto
+statements. Blocks in a structured program do not have multiple entries or exits.
+Structured programs are more tractable mathematically than their unstructured
+counterparts. These “advantages” of structured programming are very similar in
+spirit to the “advantages” of functional programming we discussed earlier.</p>
+</blockquote>
+<h2><a href="#whom-when-where" aria-hidden="true" class="anchor" id="whom-when-where"></a>Whom, when, where</h2>
+<p>Why functional programming matters, was published in 1989 in the <em>Computer Journal</em> by <a href="http://www.cse.chalmers.se/~rjmh/">John
+Hughes</a> as a professor at  Chalmers University of Technology.
+He had however originally written it in 1984 as a post-doc.</p>
+<blockquote>
+<p>I wrote the paper in 1984 as a post-doc, but misjudged its significance completely.
+I thought it would be unpublishable, because it contained no difficult research results,
+just a manifesto and some nice programming examples. So I circulated it privately to friends,
+who passed it on to others, and soon I found it turning up in the most unexpected places.
+Finally, after five years, I was invited to submit it to the Computer Journal. <a href="http://www.cse.chalmers.se/~rjmh/citations/my_most_influential_papers.htm">link</a></p>
+</blockquote>
+<h2><a href="#how" aria-hidden="true" class="anchor" id="how"></a>How</h2>
+<p>As examples of the application of high-order functions and lazy-evaluation, the paper covers several
+topics:</p>
+<h3><a href="#lists-and-trees-manipulation" aria-hidden="true" class="anchor" id="lists-and-trees-manipulation"></a>Lists and Trees manipulation.</h3>
+<p>Use of high-order functions and recursive patterns is used to illustrate how simple modularizations
+can be re-used to implement more complex functionality.</p>
+<h3><a href="#numerical-algorithms" aria-hidden="true" class="anchor" id="numerical-algorithms"></a>Numerical algorithms</h3>
+<p>The Newton-Raphson Square Roots algorithm is implemented in a modular fashion using lazy
+evalaution.</p>
+<blockquote>
+<p>This program is indivisible in conventional languages. We will express it in a
+more modular form using lazy evaluation, and then show some other uses to
+which the parts may be put.</p>
+</blockquote>
+<p>Numerical differentiation and integration implementations are also illustrated using lazy
+evaluation.</p>
+<h3><a href="#alpha-beta-heuristic-an-ai-algorithm" aria-hidden="true" class="anchor" id="alpha-beta-heuristic-an-ai-algorithm"></a>Alpha-beta heuristic, an AI algorithm</h3>
+<blockquote>
+<p>We have argued that functional languages are powerful primarily because they
+provide two new kinds of glue: higher-order functions and lazy evaluation. In
+this section we take a larger example from Artificial Intelligence and show how
+it can be programmed quite simply using these two kinds of glue.</p>
+</blockquote>
+<p>The paper implements the alpha-beta heurisitc, an algorithm for estimating how good a position a
+game player is in. The algorithm works by looking ahead to see how the game might develop, but
+avoids pursuing unprofitable plays. It's used to predict favourable positions.</p>
+<h2><a href="#recap" aria-hidden="true" class="anchor" id="recap"></a>Recap</h2>
+<p>&quot;Why Functional Programming Matters&quot; argues that modularity is key to successful programming. It
+illustrates how functional programming eases modularisation and composability way
+better than conventional languages. To this end, it gives examples of lists and trees manipulation,
+numerical algorithms and an artificial intelligence algorithm applications.</p>
+
+    </div>
+  </div>
+</section>
+
+    
+<!-- scripts -->
+<script src="/scripts/highlight.js"></script>
+
+  </body>
+</html>

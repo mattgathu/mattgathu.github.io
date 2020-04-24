@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Actix Web Error Handling | Matt Gathu</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="description" content="Matt Gathu's Blog">
+     <!-- Twitter card -->
+ <meta name="twitter:card" content="summary">
+ <meta name="twitter:site" content="@swissgathu">
+ <meta name="twitter:creator" content="@swissgathu">
+ <meta name="twitter:title" content="Actix Web Error Handling | Matt Gathu">
+ <meta name="twitter:description" content="matt gathu blog">
+
+
+<!-- fonts -->
+
+
+<!-- styles -->
+<link rel="stylesheet" href="/styles/vendor.css"/>
+<link rel="stylesheet" href="/styles/fonts.css"/>
+<link rel="stylesheet" href="/styles/app.css"/>
+<link rel="stylesheet" href="/styles/highlight.css"/>
+
+<!-- favicon -->
+<link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16.png">
+<link rel="shortcut icon" href="/images/favicon.ico">
+<link rel="manifest" href="/images/site.webmanifest">
+<link rel="mask-icon" href="/images/safari-pinned-tab.svg" color="#5bbad5">
+<meta name="msapplication-TileColor" content="#00aba9">
+<meta name="theme-color" content="#ffffff">
+
+ <!-- atom -->
+ <link type="application/atom+xml" rel="alternate" href="https://mattgathu.github.io/feed.xml" title="Matt Gathu" />
+
+  </head>
+  <body>
+    <nav class="flex flex-row justify-center justify-end-l items-center flex-wrap ph2 pl3-ns pr4-ns">
+  <div class="brand flex-auto w-100 w-auto-l self-start tc tl-l">
+    <a href="/">
+      <span class="dib ml1 ml0-l">Matt Gathu</span>
+    </a>
+  </div>
+
+</nav>
+
+<section id="Actix Web Error Handling" class="white">
+  <div class="w-100 mw-none ph3 mw8-m mw8-l center f3">
+    <header>
+      <h2>Actix Web Error Handling</h2>
+      
+    </header>
+
+    <div class="publish-date-author">Apr. 16, 2020 &middot; Matt
+    </div>
+
+    <div class="post">
+      <p><a href="https://actix.rs/">Actix web</a> is one of the most popular web frameworks written in <a href="https://www.rust-lang.org/">Rust</a>.
+It is an async actor-based framework that prioritizes type safety, extensibility and speed.</p>
+<p>Error handling in Actix is achieved using two things: It's own <a href="https://docs.rs/actix-web/2/actix_web/error/struct.Error.html">Error type</a> and a <a href="https://docs.rs/actix-web/2/actix_web/error/trait.ResponseError.html">ResponseError</a> trait
+that allows you to send back your custom error as an <a href="https://docs.rs/actix-web/2.0.0/actix_web/struct.HttpResponse.html">HttpResponse</a>.</p>
+<p>Below is a simple contrived example of Actix's Error type in action.</p>
+<pre><code class="language-rust">use actix_web::{get, web, App, Error, HttpResponse, HttpServer};
+use std::io::Read;
+
+#[get(&quot;/file/{file_name}&quot;)]
+async fn get_file(file_name: web::Path&lt;String&gt;) -&gt; Result&lt;HttpResponse, Error&gt; {
+    let mut s = String::new();
+    std::fs::File::open(file_name.into_inner())?.read_to_string(&amp;mut s)?;
+    Ok(HttpResponse::Ok().body(s))
+}
+
+#[actix_rt::main]
+async fn main() -&gt; std::io::Result&lt;()&gt; {
+   
+    HttpServer::new(move || {
+        App::new()
+            .service(get_file)
+    })
+    .bind(&quot;0.0.0.0:80&quot;)?
+    .run()
+    .await
+}
+</code></pre>
+<p>Anything that implements stdlib's <a href="https://doc.rust-lang.org/stable/std/error/trait.Error.html">Error</a> can be propagated up to an Actix Error using the <code>?</code> syntax.
+Actix will then generate a generic HttpResponse with the body being the error message. In the above example
+Actix is even smart enough to infer Status Codes from the the io::Error kind, e.g. returning a <code>404 Not Found</code> when
+the error kind is <code>io::ErrorKind::NotFound </code>.</p>
+<p>We however generally should avoid using this generic interface since it tends to expose a service's internals to its clients.
+For example if the file operation in the example is part of a larger request handling logic then it won't make sense for the
+client when they get a <code>404 Not Found</code> response. This is typically true for most web services as errors can arise from multiple sources such as databases, filesystems, Oses and other apis used by the services.</p>
+<p>Another reason to avoid this generic approach is when you would like to send a structured error response to the clients. This can
+be a json response that has a defined format for errors such as:</p>
+<pre><code class="language-json">{
+    &quot;code&quot;: 404,
+    &quot;error&quot;: &quot;NotFound&quot;,
+    &quot;message&quot;: &quot;Requested file: `missing_file.ext` was not found&quot;
+}
+</code></pre>
+<p>Actix's <a href="https://docs.rs/actix-web/2/actix_web/error/trait.ResponseError.html">ResponseError</a> trait provides us with a way to provide a unified error response and to also avoid exposing
+the service's internals to the client.</p>
+<p>The way to achieve this is threefold:</p>
+<ul>
+<li>Define a custom error type that implements the <code>ResponseError</code> trait.</li>
+<li>Map all of internal errors to our custom error.</li>
+<li>Force actix to only return our custom error.</li>
+</ul>
+<p>When we transform the contrived example to this new approach, we end up with:</p>
+<pre><code class="language-rust">use actix_web::{get, web, App, HttpResponse, HttpServer, error::ResponseError, http::StatusCode};
+use std::io::Read;
+
+use serde::{Serialize};
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+enum CustomError {
+    #[error(&quot;Requested file was not found&quot;)]
+    NotFound,
+    #[error(&quot;You are forbidden to access requested file.&quot;)]
+    Forbidden,
+    #[error(&quot;Unknown Internal Error&quot;)]
+    Unknown
+}
+impl CustomError {
+    pub fn name(&amp;self) -&gt; String {
+        match self {
+            Self::NotFound =&gt; &quot;NotFound&quot;.to_string(),
+            Self::Forbidden =&gt; &quot;Forbidden&quot;.to_string(),
+            Self::Unknown =&gt; &quot;Unknown&quot;.to_string(),
+        }
+    }
+}
+impl ResponseError for CustomError {
+    fn status_code(&amp;self) -&gt; StatusCode {
+        match *self {
+            Self::NotFound  =&gt; StatusCode::NOT_FOUND,
+            Self::Forbidden =&gt; StatusCode::FORBIDDEN,
+            Self::Unknown =&gt; StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+
+    fn error_response(&amp;self) -&gt; HttpResponse {
+        let status_code = self.status_code();
+        let error_response = ErrorResponse {
+            code: status_code.as_u16(),
+            message: self.to_string(),
+            error: self.name(),
+        };
+        HttpResponse::build(status_code).json(error_response)
+    }
+}
+
+fn map_io_error(e: std::io::Error) -&gt; CustomError {
+    match e.kind() {
+        std::io::ErrorKind::NotFound =&gt; CustomError::NotFound,
+        std::io::ErrorKind::PermissionDenied =&gt; CustomError::Forbidden,
+        _ =&gt; CustomError::Unknown,
+    }
+}
+
+#[derive(Serialize)]
+struct ErrorResponse {
+    code: u16,
+    error: String,
+    message: String,
+}
+
+#[get(&quot;/file/{file_name}&quot;)]
+async fn get_file(file_name: web::Path&lt;String&gt;) -&gt; Result&lt;HttpResponse, CustomError&gt; {
+    let mut s = String::new();
+    std::fs::File::open(file_name.to_string()).map_err(map_io_error)?.read_to_string(&amp;mut s).map_err(map_io_error)?;
+    Ok(HttpResponse::Ok().body(s))
+}
+
+#[actix_rt::main]
+async fn main() -&gt; std::io::Result&lt;()&gt; {
+   
+    HttpServer::new(move || {
+        App::new()
+            .service(get_file)
+    })
+    .bind(&quot;0.0.0.0:80&quot;)?
+    .run()
+    .await
+}
+</code></pre>
+<p>We use the excellent <a href="https://docs.rs/thiserror/1.0.15/thiserror/">thiserror</a> crate to derive the <code>Error</code> trait for our <code>CustomError</code> enum.</p>
+<p>We then implement the <code>ResponseError</code> trait for CustomError and map the io Errors.</p>
+<p>We change the request handler's return type from <code>Result&lt;HttpResponse, Error&gt;</code> to <code>Result&lt;HttpResponse, CustomError&gt;</code>
+and this ensures the all the errors returned are part of our CustomError enum. This return type constraining is
+what guarantees that we never leak the service internals to the client when an error occurs.</p>
+<p>Skipping the <code>map_err</code> on one of the io errors will result in a compilation error:</p>
+<pre><code>`?` couldn't convert the error to `CustomError`
+
+the trait `std::convert::From&lt;std::io::Error&gt;` is not implemented for `CustomError`
+</code></pre>
+<p>Now whenever an error is encountered the service will return a formatted json response, such as:</p>
+<pre><code class="language-json">{
+    &quot;code&quot;:403,
+    &quot;error&quot;:&quot;Forbidden&quot;,
+    &quot;message&quot;:&quot;You are forbidden to access requested file.&quot;
+}
+</code></pre>
+
+    </div>
+  </div>
+</section>
+
+    
+<!-- scripts -->
+<script src="/scripts/highlight.js"></script>
+
+  </body>
+</html>

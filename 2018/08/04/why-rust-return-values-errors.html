@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Why Rust uses Return Values for errors instead of Exceptions | Matt Gathu</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="description" content="Matt Gathu's Blog">
+     <!-- Twitter card -->
+ <meta name="twitter:card" content="summary">
+ <meta name="twitter:site" content="@swissgathu">
+ <meta name="twitter:creator" content="@swissgathu">
+ <meta name="twitter:title" content="Why Rust uses Return Values for errors instead of Exceptions | Matt Gathu">
+ <meta name="twitter:description" content="matt gathu blog">
+
+
+<!-- fonts -->
+
+
+<!-- styles -->
+<link rel="stylesheet" href="/styles/vendor.css"/>
+<link rel="stylesheet" href="/styles/fonts.css"/>
+<link rel="stylesheet" href="/styles/app.css"/>
+<link rel="stylesheet" href="/styles/highlight.css"/>
+
+<!-- favicon -->
+<link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16.png">
+<link rel="shortcut icon" href="/images/favicon.ico">
+<link rel="manifest" href="/images/site.webmanifest">
+<link rel="mask-icon" href="/images/safari-pinned-tab.svg" color="#5bbad5">
+<meta name="msapplication-TileColor" content="#00aba9">
+<meta name="theme-color" content="#ffffff">
+
+ <!-- atom -->
+ <link type="application/atom+xml" rel="alternate" href="https://mattgathu.github.io/feed.xml" title="Matt Gathu" />
+
+  </head>
+  <body>
+    <nav class="flex flex-row justify-center justify-end-l items-center flex-wrap ph2 pl3-ns pr4-ns">
+  <div class="brand flex-auto w-100 w-auto-l self-start tc tl-l">
+    <a href="/">
+      <span class="dib ml1 ml0-l">Matt Gathu</span>
+    </a>
+  </div>
+
+</nav>
+
+<section id="Why Rust uses Return Values for errors instead of Exceptions" class="white">
+  <div class="w-100 mw-none ph3 mw8-m mw8-l center f3">
+    <header>
+      <h2>Why Rust uses Return Values for errors instead of Exceptions</h2>
+      
+    </header>
+
+    <div class="publish-date-author">Aug. 4, 2018 &middot; Matt
+    </div>
+
+    <div class="post">
+      <p>I was up asking myself why error handling in Rust uses return values istead of exceptions and I
+found this explanation that I'm quoting here for my future self.</p>
+<blockquote>
+<p>Some people need to use Rust in places where exceptions aren't allowed (because the unwind
+tables and cleanup code are too big). Those people include virtually all browser vendors and game developers.
+Furthermore, exceptions have this nasty codegen tradeoff. Either you make them zero-cost
+(as C++, Obj-C, and Swift compilers typically do), in which case throwing an exception is
+very expensive at runtime, or you make them non-zero-cost (as Java HotSpot and Go 6g/8g do),
+in which case you eat a performance penalty for every single try block (in Go, defer) even
+if no exception is thrown. For a language with RAII, every single stack object with a destructor
+forms an implicit try block, so this is impractical in practice.</p>
+<p>The performance overhead of zero-cost exceptions is not a theoretical issue. I remember stories
+of Eclipse taking 30 seconds to start up when compiled with GCJ (which used zero-cost exceptions)
+because it throws thousands of exceptions while starting.</p>
+<p>The C approach to error handling has a great performance and code size story relative to exceptions
+when you consider both the error and success paths, which is why systems code overwhelmingly prefers it.
+It has poor ergonomics and safety, however, which Rust addresses with Result. Rust's approach
+forms a hybrid that's designed to achieve the performance of C error handling while eliminating its gotchas.</p>
+<p>~ pcwalton</p>
+</blockquote>
+
+    </div>
+  </div>
+</section>
+
+    
+<!-- scripts -->
+<script src="/scripts/highlight.js"></script>
+
+  </body>
+</html>

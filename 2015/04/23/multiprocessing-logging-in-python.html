@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Python Multiprocess Logging | Matt Gathu</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="description" content="Matt Gathu's Blog">
+     <!-- Twitter card -->
+ <meta name="twitter:card" content="summary">
+ <meta name="twitter:site" content="@swissgathu">
+ <meta name="twitter:creator" content="@swissgathu">
+ <meta name="twitter:title" content="Python Multiprocess Logging | Matt Gathu">
+ <meta name="twitter:description" content="matt gathu blog">
+
+
+<!-- fonts -->
+
+
+<!-- styles -->
+<link rel="stylesheet" href="/styles/vendor.css"/>
+<link rel="stylesheet" href="/styles/fonts.css"/>
+<link rel="stylesheet" href="/styles/app.css"/>
+<link rel="stylesheet" href="/styles/highlight.css"/>
+
+<!-- favicon -->
+<link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16.png">
+<link rel="shortcut icon" href="/images/favicon.ico">
+<link rel="manifest" href="/images/site.webmanifest">
+<link rel="mask-icon" href="/images/safari-pinned-tab.svg" color="#5bbad5">
+<meta name="msapplication-TileColor" content="#00aba9">
+<meta name="theme-color" content="#ffffff">
+
+ <!-- atom -->
+ <link type="application/atom+xml" rel="alternate" href="https://mattgathu.github.io/feed.xml" title="Matt Gathu" />
+
+  </head>
+  <body>
+    <nav class="flex flex-row justify-center justify-end-l items-center flex-wrap ph2 pl3-ns pr4-ns">
+  <div class="brand flex-auto w-100 w-auto-l self-start tc tl-l">
+    <a href="/">
+      <span class="dib ml1 ml0-l">Matt Gathu</span>
+    </a>
+  </div>
+
+</nav>
+
+<section id="Python Multiprocess Logging" class="white">
+  <div class="w-100 mw-none ph3 mw8-m mw8-l center f3">
+    <header>
+      <h2>Python Multiprocess Logging</h2>
+      
+    </header>
+
+    <div class="publish-date-author">Apr. 23, 2015 &middot; Matt
+    </div>
+
+    <div class="post">
+      <p>This post marks the culmination of my journey (read struggle) trying to
+leverage a common logging for several concurrent processes.</p>
+<p>Single threaded logging is pretty straight forward,you instantiate a logger,
+create a handler for it and add the handler and voila, a basic logger.</p>
+<pre><code class="language-python">def create_logger(name):
+    &quot;&quot;&quot;Create a logger
+
+    args: name (str): name of logger
+
+    returns: logger (obj): logging.Logger instance
+    &quot;&quot;&quot;
+    logger = logging.getLogger(name)
+    fmt = logging.Formatter('%(asctime)s - %(name)s -'
+                            ' %(levelname)s -%(message)s')
+    hdl = logging.FileHandler(name+'.log')
+    hdl.setFormatter(fmt)
+
+    logger.addHandler(hdl)
+
+    return logger
+</code></pre>
+<p>I used a filehandler in the code snippet since it will present a challenge when
+you execute the script in a multiprocessing environment.</p>
+<p>What you ideally envision is that processes will log to a single log file, which is true,
+however each process operate in it's own sandboxed environment and there is the
+possibility of two processes writing to the log file at the same time which could lead to file corruption.</p>
+<p>For you to use a single log file across several processes, your need a form of
+log synchronization for all the logs, enter
+<a href="http://en.wikipedia.org/wiki/Queue_%28abstract_data_type%29">queues</a>. The
+concept of a queue is pretty straight forward, it's first-in-first-out (FIFO)
+data structure. It will act as a bridge between the processes and the log file.
+A log entry is enqueued to the queue and the queue is in turn dequeued and the
+entry written to the file.
+A custom handler with a queue is implemented.</p>
+<pre><code class="language-python">import sys
+import logging
+import traceback
+import threading
+import multiprocessing
+from logging import FileHandler as FH
+
+
+# ============================================================================
+# Define Log Handler
+# ============================================================================
+class CustomLogHandler(logging.Handler):
+    &quot;&quot;&quot;multiprocessing log handler
+
+    This handler makes it possible for several processes
+    to log to the same file by using a queue.
+
+    &quot;&quot;&quot;
+    def __init__(self, fname):
+        logging.Handler.__init__(self)
+
+        self._handler = FH(fname)
+        self.queue = multiprocessing.Queue(-1)
+
+        thrd = threading.Thread(target=self.receive)
+        thrd.daemon = True
+        thrd.start()
+
+    def setFormatter(self, fmt):
+        logging.Handler.setFormatter(self, fmt)
+        self._handler.setFormatter(fmt)
+
+    def receive(self):
+        while True:
+            try:
+                record = self.queue.get()
+                self._handler.emit(record)
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except EOFError:
+                break
+            except:
+                traceback.print_exc(file=sys.stderr)
+
+    def send(self, s):
+        self.queue.put_nowait(s)
+
+    def _format_record(self, record):
+        if record.args:
+            record.msg = record.msg % record.args
+            record.args = None
+        if record.exc_info:
+            dummy = self.format(record)
+            record.exc_info = None
+
+        return record
+
+    def emit(self, record):
+        try:
+            s = self._format_record(record)
+            self.send(s)
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except:
+            self.handleError(record)
+
+    def close(self):
+        self._handler.close()
+        logging.Handler.close(self)
+</code></pre>
+<p>The logging configuration for the custom handler in yaml.</p>
+<pre><code class="language-yaml">version: 1
+disable_existing_loggers: False
+formatters:
+    simple:
+        format: &quot;%(asctime)s %(levelname)s %(message)s&quot;
+handlers:
+    clog:
+        class: CustomLogHandler
+        level: INFO
+        formatter: simple
+        fname: logs/cplog.log
+root:
+    level: DEBUG
+    handlers: [clog]
+</code></pre>
+<p>In the main a process, a root logger with the config in created
+and this will be inherited by the child processes.</p>
+<pre><code>logger = logging.getLogger(__name__)
+config = yaml.load(open('logging.yaml').read())
+logging.config.dictConfig(config)
+</code></pre>
+<p>The child process creates a root logger and and logs will pass
+through the custom handler and be synchronized by the queue.</p>
+<p>For the complete picture checkout this
+<a href="https://gist.github.com/JesseBuesking/10674086">gist</a> by <a href="http://jessebuesking.com/">Jesse
+Buesking</a></p>
+
+    </div>
+  </div>
+</section>
+
+    
+<!-- scripts -->
+<script src="/scripts/highlight.js"></script>
+
+  </body>
+</html>

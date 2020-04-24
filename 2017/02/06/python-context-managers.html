@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Python Context Managers | Matt Gathu</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="description" content="Matt Gathu's Blog">
+     <!-- Twitter card -->
+ <meta name="twitter:card" content="summary">
+ <meta name="twitter:site" content="@swissgathu">
+ <meta name="twitter:creator" content="@swissgathu">
+ <meta name="twitter:title" content="Python Context Managers | Matt Gathu">
+ <meta name="twitter:description" content="matt gathu blog">
+
+
+<!-- fonts -->
+
+
+<!-- styles -->
+<link rel="stylesheet" href="/styles/vendor.css"/>
+<link rel="stylesheet" href="/styles/fonts.css"/>
+<link rel="stylesheet" href="/styles/app.css"/>
+<link rel="stylesheet" href="/styles/highlight.css"/>
+
+<!-- favicon -->
+<link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16.png">
+<link rel="shortcut icon" href="/images/favicon.ico">
+<link rel="manifest" href="/images/site.webmanifest">
+<link rel="mask-icon" href="/images/safari-pinned-tab.svg" color="#5bbad5">
+<meta name="msapplication-TileColor" content="#00aba9">
+<meta name="theme-color" content="#ffffff">
+
+ <!-- atom -->
+ <link type="application/atom+xml" rel="alternate" href="https://mattgathu.github.io/feed.xml" title="Matt Gathu" />
+
+  </head>
+  <body>
+    <nav class="flex flex-row justify-center justify-end-l items-center flex-wrap ph2 pl3-ns pr4-ns">
+  <div class="brand flex-auto w-100 w-auto-l self-start tc tl-l">
+    <a href="/">
+      <span class="dib ml1 ml0-l">Matt Gathu</span>
+    </a>
+  </div>
+
+</nav>
+
+<section id="Python Context Managers" class="white">
+  <div class="w-100 mw-none ph3 mw8-m mw8-l center f3">
+    <header>
+      <h2>Python Context Managers</h2>
+      
+    </header>
+
+    <div class="publish-date-author">Feb. 6, 2017 &middot; Matt
+    </div>
+
+    <div class="post">
+      <h2><a href="#what" aria-hidden="true" class="anchor" id="what"></a>What</h2>
+<p>A context manager, in Python, is a resource  acquisition and release mechanism that prevents
+resource leak and ensures startup and cleanup (exit) actions are always  done.</p>
+<p>A resource is basically a computing component with limited availability e.g. files, network sockets
+etc. The act of refusing to release a resource when a process has finished using it is known as a
+<em>resource leak</em>. An example would be leaving a file open after writing into it, thereby making it
+impossible for other processes to acquire it.</p>
+<h2><a href="#why" aria-hidden="true" class="anchor" id="why"></a>Why</h2>
+<p>The main motivation behind context managers is to ease resource management by providing support
+for resource acquisition and release. This introduces to several advantages:</p>
+<ul>
+<li>eliminates the need of repeating resource acquisition/release code fragments: the DRY
+principle.</li>
+<li>prevent errors arounds resource management.</li>
+<li>eases code refactoring: this is a consequence of DRY principle.</li>
+<li>makes resource cleanup easier: by guarranteeing startup (entry) and cleanup (exit) actions.</li>
+</ul>
+<h2><a href="#whom-when-where" aria-hidden="true" class="anchor" id="whom-when-where"></a>Whom, when, where</h2>
+<p>Context managers became a feature of the Python standard library with the  acceptance of <a href="https://www.python.org/dev/peps/pep-0343/">PEP 343 --
+The &quot;with&quot; statement</a> on 27 June 2005 and was implemented in a beta version of Python 2.5.</p>
+<p>PEP 343, written by Guido van Rossum and Nick Coghlan, brought together ideas and concepts that had
+been proposed in other PEPs (that were rejected in favour of 343):</p>
+<ul>
+<li><a href="https://www.python.org/dev/peps/pep-0340/">PEP 340</a>, Anonymous Block Statements</li>
+<li><a href="https://www.python.org/dev/peps/pep-0310/">PEP 310</a>, Reliable Acquisition/Release Pairs</li>
+<li><a href="https://www.python.org/dev/peps/pep-0346/">PEP 346</a>, User Defined (&quot;with&quot;) Statements</li>
+<li><a href="https://www.python.org/dev/peps/pep-0319/">PEP 319</a>, Python Synchronize/Asynchronize Block</li>
+</ul>
+<p>A <em>with</em> statement uses the syntax:</p>
+<pre><code class="language-python">with EXPR as VAR:
+    BLOCK
+</code></pre>
+<p>Where <em>with</em> and <em>as</em> are keywords, <em>EXPR</em> is an arbitrary expression and <em>VAR</em> is a single
+assignment target.</p>
+<h2><a href="#how" aria-hidden="true" class="anchor" id="how"></a>How</h2>
+<p>A context manager is expected to implement <em><code>__enter__()</code></em> and <em><code>__exit__()</code></em> methods that are invoked on
+entry to and exit from the body of the <em>with</em> statement. These methods are known as the <em>&quot;context
+management protocol&quot;</em>.</p>
+<p>The translation of the <em>with</em> statement syntax is:</p>
+<pre><code class="language-python">mgr = (EXPR)
+exit = type(mgr).__exit__
+value = type(mgr).__enter__(mgr) # entry method invoked
+exc = True
+try:
+    try:
+        VAR = value  # Only if &quot;as VAR&quot; is present
+        BLOCK
+    except:
+        # The exceptional case is handled here
+        exc = False
+        if not exit(mgr, *sys.exc_info()):
+            raise
+        # The exception is swallowed if exit() returns true
+finally:
+    # The normal and non-local-goto cases are handled here
+    if exc:
+        exit(mgr, None, None, None) # exit method invoked
+</code></pre>
+<p>Example of a context manager would look like this:</p>
+<pre><code class="language-python">class Locked:
+    def __init__(self, lock):
+        self.lock = lock
+
+    def __enter__(self):
+        self.lock.acquire()
+
+    def __exit__(self, type, value, tb):
+        self.lock.release()
+</code></pre>
+<p>Where special state needs to be preserved, a generator-based template can be used:</p>
+<pre><code class="language-python">class GeneratorContextManager(object):
+
+    def __init__(self, gen):
+        self.gen = gen
+
+    def __enter__(self):
+        try:
+            return self.gen.next()
+        except StopIteration:
+            raise RuntimeError(&quot;generator did not yield&quot;)
+
+    def __exit__(self, type, value, traceback):
+        if type is None:
+            try:
+                self.gen.next()
+            except StopIteration:
+                return
+            else:
+                raise RuntimeError(&quot;generator did not stop&quot;)
+        else:
+            try:
+                self.gen.throw(type, value, traceback)
+                raise RuntimeError(&quot;generator did not stop after throw()&quot;)
+            except StopIteration:
+                return True
+            except:
+                if sys.exc_info()[1] is not value:
+                    raise
+
+class contextmanager(func):
+    def helper(*args, **kwargs):
+        return GeneratorContextManager(func(*args, **kwargs))
+    return helper
+</code></pre>
+<p>This decorator could be used as follows:</p>
+<pre><code class="language-python">@contextmanager
+def openfile(fname):
+    f = open(fname)
+    try:
+        yield f
+    finally:
+        f.close()
+</code></pre>
+<p>A robust implementation of this decorator is available as part of the <a href="https://docs.python.org/3/library/contextlib.html">contextlib</a>
+module of the standard library which provides utilities for common tasks involving the <code>with</code> statement.</p>
+<p>Some types in the standard library can be identified as context managers, that is, they are already
+endowed with the <code>__enter__()</code> and <code>__exit__()</code> methods. They include:</p>
+<ul>
+<li>file</li>
+<li>thread.LockType</li>
+<li>threading.Lock</li>
+<li>threading.RLock</li>
+<li>threading.Condition</li>
+<li>threading.Semaphore</li>
+</ul>
+<p>Thus the Pythonic way of working with files is usually:</p>
+<pre><code class="language-python">with open('filename') as myfile:
+    do_something(myfile)
+</code></pre>
+<p>This ensures the file is closed after the <code>do_something</code> block is exited.</p>
+<h2><a href="#recap" aria-hidden="true" class="anchor" id="recap"></a>Recap</h2>
+<p>Python context managers are meant to make resource management painless, they are used in conjunction with the builtin <code>with</code> statement. There were as a result of several Python Enhancement Proposals (PEPs) and there is a <code>contextlib</code> module in the standard library that provides utilities for common context management tasks.</p>
+
+    </div>
+  </div>
+</section>
+
+    
+<!-- scripts -->
+<script src="/scripts/highlight.js"></script>
+
+  </body>
+</html>

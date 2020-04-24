@@ -1,0 +1,2320 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en">
+    <generator uri="https://mattgathu.github.io/" version="0.1.0">Matt Gathu</generator>
+    <link href="https://mattgathu.github.io/feed.xml" rel="self" type="application/atom+xml" />
+    <link href="https://mattgathu.github.io/" rel="alternate" type="text/html" />
+    <id>https://mattgathu.github.io/</id>
+    <title>Matt Gathu</title>
+    <subtitle>matt gathu blog</subtitle>
+    <author>
+        <name>Maintained by matt gathu.</name>
+        <uri>https://github.com/mattgathu</uri>
+    </author>
+    <updated>2020-04-24T22:14:32.272007+00:00</updated>
+
+    
+    <entry>
+        <title>Actix Web Error Handling</title>
+        <link rel="alternate" href="https://mattgathu.github.io/2020/04/16/actix-web-error-handling.html" type="text/html" title="Actix Web Error Handling" />
+        <published>2020-04-16T00:00:00+00:00</published>
+        <updated>2020-04-16T00:00:00+00:00</updated>
+        <id>https://mattgathu.github.io/2020/04/16/actix-web-error-handling.html</id>
+        <content type="html" xml:base="https://mattgathu.github.io/2020/04/16/actix-web-error-handling.html">&lt;p&gt;&lt;a href=&quot;https://actix.rs/&quot;&gt;Actix web&lt;/a&gt; is one of the most popular web frameworks written in &lt;a href=&quot;https://www.rust-lang.org/&quot;&gt;Rust&lt;/a&gt;.
+It is an async actor-based framework that prioritizes type safety, extensibility and speed.&lt;/p&gt;
+&lt;p&gt;Error handling in Actix is achieved using two things: It's own &lt;a href=&quot;https://docs.rs/actix-web/2/actix_web/error/struct.Error.html&quot;&gt;Error type&lt;/a&gt; and a &lt;a href=&quot;https://docs.rs/actix-web/2/actix_web/error/trait.ResponseError.html&quot;&gt;ResponseError&lt;/a&gt; trait
+that allows you to send back your custom error as an &lt;a href=&quot;https://docs.rs/actix-web/2.0.0/actix_web/struct.HttpResponse.html&quot;&gt;HttpResponse&lt;/a&gt;.&lt;/p&gt;
+&lt;p&gt;Below is a simple contrived example of Actix's Error type in action.&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;use actix_web::{get, web, App, Error, HttpResponse, HttpServer};
+use std::io::Read;
+
+#[get(&amp;quot;/file/{file_name}&amp;quot;)]
+async fn get_file(file_name: web::Path&amp;lt;String&amp;gt;) -&amp;gt; Result&amp;lt;HttpResponse, Error&amp;gt; {
+    let mut s = String::new();
+    std::fs::File::open(file_name.into_inner())?.read_to_string(&amp;amp;mut s)?;
+    Ok(HttpResponse::Ok().body(s))
+}
+
+#[actix_rt::main]
+async fn main() -&amp;gt; std::io::Result&amp;lt;()&amp;gt; {
+   
+    HttpServer::new(move || {
+        App::new()
+            .service(get_file)
+    })
+    .bind(&amp;quot;0.0.0.0:80&amp;quot;)?
+    .run()
+    .await
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;Anything that implements stdlib's &lt;a href=&quot;https://doc.rust-lang.org/stable/std/error/trait.Error.html&quot;&gt;Error&lt;/a&gt; can be propagated up to an Actix Error using the &lt;code&gt;?&lt;/code&gt; syntax.
+Actix will then generate a generic HttpResponse with the body being the error message. In the above example
+Actix is even smart enough to infer Status Codes from the the io::Error kind, e.g. returning a &lt;code&gt;404 Not Found&lt;/code&gt; when
+the error kind is &lt;code&gt;io::ErrorKind::NotFound &lt;/code&gt;.&lt;/p&gt;
+&lt;p&gt;We however generally should avoid using this generic interface since it tends to expose a service's internals to its clients.
+For example if the file operation in the example is part of a larger request handling logic then it won't make sense for the
+client when they get a &lt;code&gt;404 Not Found&lt;/code&gt; response. This is typically true for most web services as errors can arise from multiple sources such as databases, filesystems, Oses and other apis used by the services.&lt;/p&gt;
+&lt;p&gt;Another reason to avoid this generic approach is when you would like to send a structured error response to the clients. This can
+be a json response that has a defined format for errors such as:&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-json&quot;&gt;{
+    &amp;quot;code&amp;quot;: 404,
+    &amp;quot;error&amp;quot;: &amp;quot;NotFound&amp;quot;,
+    &amp;quot;message&amp;quot;: &amp;quot;Requested file: `missing_file.ext` was not found&amp;quot;
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;Actix's &lt;a href=&quot;https://docs.rs/actix-web/2/actix_web/error/trait.ResponseError.html&quot;&gt;ResponseError&lt;/a&gt; trait provides us with a way to provide a unified error response and to also avoid exposing
+the service's internals to the client.&lt;/p&gt;
+&lt;p&gt;The way to achieve this is threefold:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;Define a custom error type that implements the &lt;code&gt;ResponseError&lt;/code&gt; trait.&lt;/li&gt;
+&lt;li&gt;Map all of internal errors to our custom error.&lt;/li&gt;
+&lt;li&gt;Force actix to only return our custom error.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;When we transform the contrived example to this new approach, we end up with:&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;use actix_web::{get, web, App, HttpResponse, HttpServer, error::ResponseError, http::StatusCode};
+use std::io::Read;
+
+use serde::{Serialize};
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+enum CustomError {
+    #[error(&amp;quot;Requested file was not found&amp;quot;)]
+    NotFound,
+    #[error(&amp;quot;You are forbidden to access requested file.&amp;quot;)]
+    Forbidden,
+    #[error(&amp;quot;Unknown Internal Error&amp;quot;)]
+    Unknown
+}
+impl CustomError {
+    pub fn name(&amp;amp;self) -&amp;gt; String {
+        match self {
+            Self::NotFound =&amp;gt; &amp;quot;NotFound&amp;quot;.to_string(),
+            Self::Forbidden =&amp;gt; &amp;quot;Forbidden&amp;quot;.to_string(),
+            Self::Unknown =&amp;gt; &amp;quot;Unknown&amp;quot;.to_string(),
+        }
+    }
+}
+impl ResponseError for CustomError {
+    fn status_code(&amp;amp;self) -&amp;gt; StatusCode {
+        match *self {
+            Self::NotFound  =&amp;gt; StatusCode::NOT_FOUND,
+            Self::Forbidden =&amp;gt; StatusCode::FORBIDDEN,
+            Self::Unknown =&amp;gt; StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+
+    fn error_response(&amp;amp;self) -&amp;gt; HttpResponse {
+        let status_code = self.status_code();
+        let error_response = ErrorResponse {
+            code: status_code.as_u16(),
+            message: self.to_string(),
+            error: self.name(),
+        };
+        HttpResponse::build(status_code).json(error_response)
+    }
+}
+
+fn map_io_error(e: std::io::Error) -&amp;gt; CustomError {
+    match e.kind() {
+        std::io::ErrorKind::NotFound =&amp;gt; CustomError::NotFound,
+        std::io::ErrorKind::PermissionDenied =&amp;gt; CustomError::Forbidden,
+        _ =&amp;gt; CustomError::Unknown,
+    }
+}
+
+#[derive(Serialize)]
+struct ErrorResponse {
+    code: u16,
+    error: String,
+    message: String,
+}
+
+#[get(&amp;quot;/file/{file_name}&amp;quot;)]
+async fn get_file(file_name: web::Path&amp;lt;String&amp;gt;) -&amp;gt; Result&amp;lt;HttpResponse, CustomError&amp;gt; {
+    let mut s = String::new();
+    std::fs::File::open(file_name.to_string()).map_err(map_io_error)?.read_to_string(&amp;amp;mut s).map_err(map_io_error)?;
+    Ok(HttpResponse::Ok().body(s))
+}
+
+#[actix_rt::main]
+async fn main() -&amp;gt; std::io::Result&amp;lt;()&amp;gt; {
+   
+    HttpServer::new(move || {
+        App::new()
+            .service(get_file)
+    })
+    .bind(&amp;quot;0.0.0.0:80&amp;quot;)?
+    .run()
+    .await
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;We use the excellent &lt;a href=&quot;https://docs.rs/thiserror/1.0.15/thiserror/&quot;&gt;thiserror&lt;/a&gt; crate to derive the &lt;code&gt;Error&lt;/code&gt; trait for our &lt;code&gt;CustomError&lt;/code&gt; enum.&lt;/p&gt;
+&lt;p&gt;We then implement the &lt;code&gt;ResponseError&lt;/code&gt; trait for CustomError and map the io Errors.&lt;/p&gt;
+&lt;p&gt;We change the request handler's return type from &lt;code&gt;Result&amp;lt;HttpResponse, Error&amp;gt;&lt;/code&gt; to &lt;code&gt;Result&amp;lt;HttpResponse, CustomError&amp;gt;&lt;/code&gt;
+and this ensures the all the errors returned are part of our CustomError enum. This return type constraining is
+what guarantees that we never leak the service internals to the client when an error occurs.&lt;/p&gt;
+&lt;p&gt;Skipping the &lt;code&gt;map_err&lt;/code&gt; on one of the io errors will result in a compilation error:&lt;/p&gt;
+&lt;pre&gt;&lt;code&gt;`?` couldn't convert the error to `CustomError`
+
+the trait `std::convert::From&amp;lt;std::io::Error&amp;gt;` is not implemented for `CustomError`
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;Now whenever an error is encountered the service will return a formatted json response, such as:&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-json&quot;&gt;{
+    &amp;quot;code&amp;quot;:403,
+    &amp;quot;error&amp;quot;:&amp;quot;Forbidden&amp;quot;,
+    &amp;quot;message&amp;quot;:&amp;quot;You are forbidden to access requested file.&amp;quot;
+}
+&lt;/code&gt;&lt;/pre&gt;
+</content>
+
+        <author>
+            <name>Matt</name>
+        </author>
+    </entry>
+    
+    <entry>
+        <title>Rust Compiler Lints</title>
+        <link rel="alternate" href="https://mattgathu.github.io/2019/01/16/rust-compiler-lints.html" type="text/html" title="Rust Compiler Lints" />
+        <published>2019-01-16T00:00:00+00:00</published>
+        <updated>2019-01-16T00:00:00+00:00</updated>
+        <id>https://mattgathu.github.io/2019/01/16/rust-compiler-lints.html</id>
+        <content type="html" xml:base="https://mattgathu.github.io/2019/01/16/rust-compiler-lints.html">&lt;h2&gt;&lt;a href=&quot;#what&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;what&quot;&gt;&lt;/a&gt;What&lt;/h2&gt;
+&lt;p&gt;The Rust compiler allows to enable or disable various lints during code compilation. This
+is a short overview of these lints.&lt;/p&gt;
+&lt;p&gt;&lt;strong&gt;TLDR:&lt;/strong&gt; The quickest way to discover these lints is to have the compiler list them.&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-shell&quot;&gt;$ rustc -W help
+&lt;/code&gt;&lt;/pre&gt;
+&lt;h2&gt;&lt;a href=&quot;#why&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;why&quot;&gt;&lt;/a&gt;Why&lt;/h2&gt;
+&lt;p&gt;Lints are useful for various use cases:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;preventing bugs by catching common gotchas such as unused variables.&lt;/li&gt;
+&lt;li&gt;enforcing coding standards such as having documentation.&lt;/li&gt;
+&lt;li&gt;relaxing compiler defaults that might not fit your use case e.g. allowing use of CamelCase&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;The above list is not exhaustive but gives an ideas of where linting is applicable.&lt;/p&gt;
+&lt;h2&gt;&lt;a href=&quot;#how&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;how&quot;&gt;&lt;/a&gt;How&lt;/h2&gt;
+&lt;p&gt;The Rust compiler lints are categorised into four levels:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;allow&lt;/li&gt;
+&lt;li&gt;warn&lt;/li&gt;
+&lt;li&gt;deny&lt;/li&gt;
+&lt;li&gt;forbid&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;These are pretty self-explanatory. The compiler with either stay silent, issue an warning or throw
+an error. The extra &lt;code&gt;forbid&lt;/code&gt; level is same as deny but cannot be overridden.&lt;/p&gt;
+&lt;p&gt;How do you configure these lint levels? There are a couple of ways:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;
+&lt;p&gt;&lt;strong&gt;via compiler flags&lt;/strong&gt;&lt;/p&gt;
+&lt;p&gt;Running &lt;code&gt;rustc -W help&lt;/code&gt; on your terminal will, among other things, show you how to set lint
+levels:&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-shell&quot;&gt;Available lint options:
+-W &amp;lt;foo&amp;gt;           Warn about &amp;lt;foo&amp;gt;
+-A &amp;lt;foo&amp;gt;           Allow &amp;lt;foo&amp;gt;
+-D &amp;lt;foo&amp;gt;           Deny &amp;lt;foo&amp;gt;
+-F &amp;lt;foo&amp;gt;           Forbid &amp;lt;foo&amp;gt; (deny &amp;lt;foo&amp;gt; and all attempts to override)
+&lt;/code&gt;&lt;/pre&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;&lt;strong&gt;via attributes&lt;/strong&gt;&lt;/p&gt;
+&lt;p&gt;You can also have attributes, such as &lt;code&gt;#![warn(missing_docs)]&lt;/code&gt;, in your &lt;code&gt;lib.rs&lt;/code&gt; file.&lt;/p&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;The compiler can also set the maximum level of all lints using the &lt;code&gt;--cap-lints&lt;/code&gt; flag. e.g.&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-shell&quot;&gt;$ rustc --cap-lints warn
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;There is a list of lints that the compiler allows, warns and denies by default. The help command
+&lt;code&gt;rustc -W help&lt;/code&gt; lists out all lints with their corresponding default level.&lt;/p&gt;
+&lt;h2&gt;&lt;a href=&quot;#reference&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;reference&quot;&gt;&lt;/a&gt;Reference&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a href=&quot;https://doc.rust-lang.org/rustc/lints/index.html&quot;&gt;https://doc.rust-lang.org/rustc/lints/index.html&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+</content>
+
+        <author>
+            <name>Matt</name>
+        </author>
+    </entry>
+    
+    <entry>
+        <title>Why Rust uses Return Values for errors instead of Exceptions</title>
+        <link rel="alternate" href="https://mattgathu.github.io/2018/08/04/why-rust-return-values-errors.html" type="text/html" title="Why Rust uses Return Values for errors instead of Exceptions" />
+        <published>2018-08-04T00:00:00+00:00</published>
+        <updated>2018-08-04T00:00:00+00:00</updated>
+        <id>https://mattgathu.github.io/2018/08/04/why-rust-return-values-errors.html</id>
+        <content type="html" xml:base="https://mattgathu.github.io/2018/08/04/why-rust-return-values-errors.html">&lt;p&gt;I was up asking myself why error handling in Rust uses return values istead of exceptions and I
+found this explanation that I'm quoting here for my future self.&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;p&gt;Some people need to use Rust in places where exceptions aren't allowed (because the unwind
+tables and cleanup code are too big). Those people include virtually all browser vendors and game developers.
+Furthermore, exceptions have this nasty codegen tradeoff. Either you make them zero-cost
+(as C++, Obj-C, and Swift compilers typically do), in which case throwing an exception is
+very expensive at runtime, or you make them non-zero-cost (as Java HotSpot and Go 6g/8g do),
+in which case you eat a performance penalty for every single try block (in Go, defer) even
+if no exception is thrown. For a language with RAII, every single stack object with a destructor
+forms an implicit try block, so this is impractical in practice.&lt;/p&gt;
+&lt;p&gt;The performance overhead of zero-cost exceptions is not a theoretical issue. I remember stories
+of Eclipse taking 30 seconds to start up when compiled with GCJ (which used zero-cost exceptions)
+because it throws thousands of exceptions while starting.&lt;/p&gt;
+&lt;p&gt;The C approach to error handling has a great performance and code size story relative to exceptions
+when you consider both the error and success paths, which is why systems code overwhelmingly prefers it.
+It has poor ergonomics and safety, however, which Rust addresses with Result. Rust's approach
+forms a hybrid that's designed to achieve the performance of C error handling while eliminating its gotchas.&lt;/p&gt;
+&lt;p&gt;~ pcwalton&lt;/p&gt;
+&lt;/blockquote&gt;
+</content>
+
+        <author>
+            <name>Matt</name>
+        </author>
+    </entry>
+    
+    <entry>
+        <title>Rust 2018 Reading Journal</title>
+        <link rel="alternate" href="https://mattgathu.github.io/2018/01/16/rust-reading-list.html" type="text/html" title="Rust 2018 Reading Journal" />
+        <published>2018-01-16T00:00:00+00:00</published>
+        <updated>2018-01-16T00:00:00+00:00</updated>
+        <id>https://mattgathu.github.io/2018/01/16/rust-reading-list.html</id>
+        <content type="html" xml:base="https://mattgathu.github.io/2018/01/16/rust-reading-list.html">&lt;ol&gt;
+&lt;li&gt;&lt;a href=&quot;#jan-15-2018&quot;&gt;Jan-15-2018 - Peeking inside Trait Objects&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&quot;#jan-16-2018&quot;&gt;Jan-16-2018 - What does Rust's &amp;quot;Unsafe&amp;quot; mean?&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&quot;#jan-17-2018&quot;&gt;Jan-17-2018 - What's Tokio and Async IO All About?&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&quot;#jan-18-2018&quot;&gt;Jan-18-2018 - A Journey into Iterators&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&quot;#jan-19-2018&quot;&gt;Jan-19-2018 - Error Handling in Rust&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&quot;#jan-20-2018&quot;&gt;Jan-20-2018 - Pretty State Machine Patterns in Rust&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&quot;#jan-21-2018&quot;&gt;Jan-21-2018 - Finding Closure in Rust&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&quot;#jan-22-2018-1&quot;&gt;Jan-22-2018 - Why is Rust difficult?&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&quot;#jan-22-2018-2&quot;&gt;Jan-22-2018 - Macros&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&quot;#jan-23-2018&quot;&gt;Jan-23-2018 - Macros in Rust pt1&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&quot;#jan-24-2018&quot;&gt;Jan-24-2018 - Macros in Rust pt2&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&quot;#jan-25-2018&quot;&gt;Jan-25-2018 - Macros in Rust pt3&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&quot;#jan-26-2018&quot;&gt;Jan-26-2018 - Macros in Rust pt4&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&quot;#jan-27-2018&quot;&gt;Jan-27-2018 - Virtual Structs Part 1 - Where Rust's enums shine&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&quot;#jan-28-2018&quot;&gt;Jan-28-2018 - Virtual Structs Part 2: Classes strike back&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&quot;#jan-29-2018&quot;&gt;Jan-29-2018 - Virtual Structs Part 3: Bringing Enums and Structs Together&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&quot;#jan-30-2018&quot;&gt;Jan-30-2018 - Taking Rust everywhere with rustup&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&quot;#jan-31-2018&quot;&gt;Jan-31-2018 - The Problem With Single-threaded Shared Mutability&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&quot;#feb-01-2018&quot;&gt;Feb-01-2018 - Rust Lifetimes for the Uninitialised&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&quot;#feb-02-2018&quot;&gt;Feb-02-2018 - What Are Sum, Product, and Pi Types?&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&quot;#feb-03-2018&quot;&gt;Feb-03-2018 - Mentally Modelling Modules&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&quot;#feb-04-2018&quot;&gt;Feb-04-2018 - Rust Tidbits: What Is a Lang Item?&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&quot;#feb-15-2018&quot;&gt;Feb-15-2018 - Some notes on Send and Sync&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&quot;#feb-16-2018&quot;&gt;Feb-16-2018 - The Option Type&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&quot;#feb-19-2018&quot;&gt;Feb-19-2018 - The Sized Trait&lt;/a&gt;&lt;/li&gt;
+&lt;/ol&gt;
+&lt;h2&gt;&lt;a href=&quot;#jan-15-2018&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;jan-15-2018&quot;&gt;&lt;/a&gt;Jan-15-2018&lt;/h2&gt;
+&lt;p&gt;&lt;strong&gt;Title:&lt;/strong&gt; &lt;a href=&quot;http://huonw.github.io/blog/2015/01/peeking-inside-trait-objects/&quot;&gt;Peeking inside Trait Objects&lt;/a&gt;&lt;/p&gt;
+&lt;p&gt;Rust's trait system forms the basis of the generic system and polymorphic functions and
+types. Traits allow abstraction over behavior that types can have in common.&lt;/p&gt;
+&lt;p&gt;Example&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;// trait definition
+trait Foo {
+    fn method(&amp;amp;self) -&amp;gt; String;
+}
+
+// implementation of trait Foo for type u8
+impl Foo for u8 {
+    fn method(&amp;amp;self) -&amp;gt; String { format!(&amp;quot;u8: {}&amp;quot;, *self) }
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;&lt;strong&gt;Trait objects&lt;/strong&gt; are normal values that store a value of any type that implements a given trait,
+where the precise type can only be known at runtime.&lt;/p&gt;
+&lt;p&gt;Trait objects are obtained by &lt;strong&gt;casting&lt;/strong&gt; and &lt;strong&gt;coercions&lt;/strong&gt;.&lt;/p&gt;
+&lt;p&gt;Representation&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;pub struct TraitObject {
+    pub data: *mut (), // data pointer
+    pub vtable: *mut (), // vtable pointer
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The &lt;strong&gt;data pointer&lt;/strong&gt; addresses the data that the trait object is storing, while the &lt;strong&gt;vtable pointer&lt;/strong&gt;
+points to the virtual method table corresponding to the trait implementation.&lt;/p&gt;
+&lt;h2&gt;&lt;a href=&quot;#jan-16-2018&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;jan-16-2018&quot;&gt;&lt;/a&gt;Jan-16-2018&lt;/h2&gt;
+&lt;p&gt;&lt;strong&gt;Title:&lt;/strong&gt; &lt;a href=&quot;http://huonw.github.io/blog/2014/07/what-does-rusts-unsafe-mean/&quot;&gt;What does Rust's &amp;quot;Unsafe&amp;quot; mean?&lt;/a&gt;&lt;/p&gt;
+&lt;p&gt;Rust aims to be memory safe, so that code cannot crash due to dangling pointers or iterator
+invalidation. There are things that cannot fit the type system e.g. interaction with the OS and
+system libs. Rust fills these gaps using the &lt;code&gt;unsafe&lt;/code&gt; keyword.&lt;/p&gt;
+&lt;p&gt;There are two ways of opting into unsafe behavior: with an &lt;code&gt;unsafe&lt;/code&gt; block or with an &lt;code&gt;unsafe&lt;/code&gt;
+function&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;// calling some C functions imported via FFI
+unsafe fn foo() {
+    some_c_function();
+}
+fn bar() {
+    unsafe {
+        another_c_function();
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The &lt;code&gt;unsafe&lt;/code&gt; context allows one to:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;call unsafe functions&lt;/li&gt;
+&lt;li&gt;dereference raw pointers&lt;/li&gt;
+&lt;li&gt;access a mutable global variable&lt;/li&gt;
+&lt;li&gt;use inline assembly&lt;/li&gt;
+&lt;/ul&gt;
+&lt;blockquote&gt;
+&lt;p&gt;An &lt;code&gt;unsafe&lt;/code&gt; context is the programmer telling the compiler that the code is guaranteed to be safe
+due to invariants impossible to express in the type system, and that it satisfies the
+&lt;a href=&quot;https://doc.rust-lang.org/nightly/reference/behavior-considered-undefined.html&quot;&gt;invariants that Rust itself imposes&lt;/a&gt;.&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;h2&gt;&lt;a href=&quot;#jan-17-2018&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;jan-17-2018&quot;&gt;&lt;/a&gt;Jan-17-2018&lt;/h2&gt;
+&lt;p&gt;&lt;strong&gt;Title:&lt;/strong&gt; &lt;a href=&quot;https://manishearth.github.io/blog/2018/01/10/whats-tokio-and-async-io-all-about/&quot;&gt;What's Tokio and Async IO All About?&lt;/a&gt;&lt;/p&gt;
+&lt;p&gt;One of Rust's key features if &amp;quot;&lt;strong&gt;fearless concurrency&lt;/strong&gt;&amp;quot;. But the kind of concurrency required for
+handling a large amount of I/O bound tasks is absent from Rust.&lt;/p&gt;
+&lt;p&gt;&amp;quot;&lt;em&gt;Handling N things at once&lt;/em&gt;&amp;quot; is best done by using threads. However, OS threads do not scale when
+&lt;strong&gt;N&lt;/strong&gt; is large: each thread needs to allocate a stack, setting up a thread involves a bunch of
+syscalls, and context switching is expensive. We need &amp;quot;lighter&amp;quot; threads.&lt;/p&gt;
+&lt;p&gt;The Go language has lightweight threads, called &amp;quot;&lt;strong&gt;goroutines&lt;/strong&gt;&amp;quot;. They are spawn using the &lt;code&gt;go&lt;/code&gt;
+keyword.&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-go&quot;&gt;listener, err = net.Listen(...)
+// handle err
+for {
+    conn, err := listener.Accept()
+    // handle err
+
+    // spawn goroutine:
+    go handler(conn)
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;This is a loop that waits for new TCP connections, and spawns a new goroutine to handle each connection.
+The spawned goroutine will shut down when &lt;code&gt;handler&lt;/code&gt; finishes. The main loop keeps executing since
+it runs in a different goroutine.&lt;/p&gt;
+&lt;p&gt;Go implements an &lt;strong&gt;M:N threading model&lt;/strong&gt; with a scheduler that
+swaps goroutines in and out, much like the OS scheduler. Rust &lt;em&gt;used&lt;/em&gt; to support lightweight threads
+pre-1.0 (feature got removed since it wasn't &lt;em&gt;zero cost&lt;/em&gt;).&lt;/p&gt;
+&lt;p&gt;Two building blocks of lightweight threading are &lt;strong&gt;Async I/O&lt;/strong&gt; and &lt;strong&gt;futures&lt;/strong&gt;.&lt;/p&gt;
+&lt;p&gt;In regular blocking I/O, when you request I/O your thread will not be allowed to run until the
+operation is done. In Async (non-blocking) I/O a thread queues a request for I/O with the OS and
+continues execution. The I/O request is executed at some later point by the kernel. The OS provides
+system calls like &lt;code&gt;epoll&lt;/code&gt; for Async I/O tasks.&lt;/p&gt;
+&lt;p&gt;The Rust library &lt;a href=&quot;https://github.com/carllerche/mio&quot;&gt;mio&lt;/a&gt; is a platform-agnostic wrapper around non-blocking I/O and interfaces
+such as epoll, kqueue etc. It forms a building block for Async I/O.&lt;/p&gt;
+&lt;p&gt;&lt;strong&gt;Futures&lt;/strong&gt; are another building block. A Future is the promise of eventually having a value.
+Futures can be &lt;code&gt;wait&lt;/code&gt;ed (blocking), &lt;code&gt;poll&lt;/code&gt;ed and chained.&lt;/p&gt;
+&lt;p&gt;&lt;strong&gt;&lt;a href=&quot;https://github.com/tokio-rs/tokio-core&quot;&gt;Tokio&lt;/a&gt;&lt;/strong&gt; is a wrapper around mio that uses futures. It has a core event loop, and you feed it
+closures that return futures. The event loop schedules the tasks (closures) passed to it.&lt;/p&gt;
+&lt;p&gt;Rust's code that has futures isn't elegant/pretty. &lt;strong&gt;Generators&lt;/strong&gt; and the &lt;strong&gt;async/await&lt;/strong&gt; syntax
+are experimental features aimed at reducing the boilerplate code, essentially
+turning&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;fn foo(...) -&amp;gt; Future&amp;lt;ReturnType, ErrorType&amp;gt; {
+    do_io().and_then(|data| do_more_io(compute(data)))
+          .and_then(|more_data| do_even_more_io(more_compute(more_data)))
+    // ......
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;to&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;#[async]
+fn foo(...) -&amp;gt; Result&amp;lt;ReturnType, ErrorType&amp;gt; {
+    let data = await!(do_io());
+    let result = compute(data);
+    let more_data = await!(do_more_io());
+    // ....
+&lt;/code&gt;&lt;/pre&gt;
+&lt;h2&gt;&lt;a href=&quot;#jan-18-2018&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;jan-18-2018&quot;&gt;&lt;/a&gt;Jan-18-2018&lt;/h2&gt;
+&lt;p&gt;&lt;strong&gt;Title:&lt;/strong&gt; &lt;a href=&quot;https://hoverbear.org/2015/05/02/a-journey-into-iterators/&quot;&gt;A Journey into Iterators&lt;/a&gt;&lt;/p&gt;
+&lt;p&gt;Rust supports iterators. They are a fast, safe, lazy way of working with data structures, streams,
+and other more creative applications.&lt;/p&gt;
+&lt;p&gt;A Rust iterator implements the &lt;a href=&quot;https://doc.rust-lang.org/core/iter/index.html#traits&quot;&gt;&lt;code&gt;Iterator&lt;/code&gt;&lt;/a&gt; trait. There are also traits from conversion from
+and into iterators.&lt;/p&gt;
+&lt;p&gt;Example&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;fn main() {
+    let input = [1, 2, 3]; // define a set of values
+    let iterator = input.iter(); // create an iterator over the them.
+    let mapped = iterator.map(|&amp;amp;x| x * 2); // map iterator to a closure
+    let output = mapped.collect::&amp;lt;Vec&amp;lt;usize&amp;gt;&amp;gt;(); // convert iterator into a collection
+    println!(&amp;quot;{:?}&amp;quot;, output);
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;Iterators provide convenient methods such as &lt;code&gt;.next()&lt;/code&gt; for single element iteration, &lt;code&gt;.take(n)&lt;/code&gt; for
+a batch pick and &lt;code&gt;.skip(n)&lt;/code&gt; for discarding &lt;code&gt;n&lt;/code&gt; elements.&lt;/p&gt;
+&lt;p&gt;Many of Rust's collection data structures support iterators e.g. Vectors, VecDeques, HashMaps.&lt;/p&gt;
+&lt;p&gt;Writing an iterator simply means implementing the &lt;code&gt;Iterator&lt;/code&gt; trait.&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;struct CountUp {
+    current: usize,
+}
+
+impl Iterator for CountUp {
+    type Item = usize;
+    // The only fn we need to provide for a basic iterator.
+    fn next(&amp;amp;mut self) -&amp;gt; Option&amp;lt;usize&amp;gt; {
+        self.current += 1;
+        Some(self.current)
+    }
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;Rust's ranges also implement the &lt;code&gt;Iterator&lt;/code&gt; traits.&lt;/p&gt;
+&lt;p&gt;Iterators can be merged, chained, even split into other iterators. They can also be &lt;code&gt;filter&lt;/code&gt;ed and
+&lt;code&gt;fold&lt;/code&gt;ed.&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;fn main() {
+	let input = 1..10;
+	let output = input
+    	.filter(|&amp;amp;item| item % 2 == 0) // Keep Evens
+    	.map(|item| item * 2) // Multiply by two.
+    	.fold(0, |accumulator, item| accumulator + item);
+	println!(&amp;quot;{}&amp;quot;, output);
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;Check out &lt;a href=&quot;https://doc.rust-lang.org/beta/std/collections/&quot;&gt;&lt;strong&gt;&lt;code&gt;std::collections&lt;/code&gt;&lt;/strong&gt;&lt;/a&gt; and &lt;a href=&quot;https://doc.rust-lang.org/beta/std/iter/&quot;&gt;&lt;strong&gt;&lt;code&gt;std::iter&lt;/code&gt;&lt;/strong&gt;&lt;/a&gt;&lt;/p&gt;
+&lt;h2&gt;&lt;a href=&quot;#jan-19-2018&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;jan-19-2018&quot;&gt;&lt;/a&gt;Jan-19-2018&lt;/h2&gt;
+&lt;p&gt;&lt;strong&gt;Title:&lt;/strong&gt; &lt;a href=&quot;http://blog.burntsushi.net/rust-error-handling/&quot;&gt;Error Handling in Rust&lt;/a&gt;&lt;/p&gt;
+&lt;p&gt;Error handling is divided into two broad categories: exceptions and return values. Error handling
+in Rust is implemented via return values.&lt;/p&gt;
+&lt;p&gt;To &lt;code&gt;unwrap&lt;/code&gt; something is to say, &amp;quot;Gimme the result, else just panic and stop execution&amp;quot;. The
+&lt;code&gt;Option&lt;/code&gt; and &lt;code&gt;Result&lt;/code&gt; types implement the &lt;code&gt;unwrap&lt;/code&gt; method.&lt;/p&gt;
+&lt;p&gt;The &lt;code&gt;Option&lt;/code&gt; type is a way to use Rust's type system to express the &lt;strong&gt;possibility of absence&lt;/strong&gt;.&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;enum Option&amp;lt;T&amp;gt; {
+    None,
+    Some(T),
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;Case analysis (through &lt;a href=&quot;https://doc.rust-lang.org/book/second-edition/ch18-03-pattern-syntax.html&quot;&gt;pattern matching&lt;/a&gt;) is used to get the value stored inside an
+&lt;code&gt;Option&amp;lt;T&amp;gt;&lt;/code&gt;. The &lt;code&gt;unwrap&lt;/code&gt; method abstracts away the case analysis.&lt;/p&gt;
+&lt;p&gt;The &lt;code&gt;Option&lt;/code&gt; trait defines combinators that are useful in get rid of case analysis. A great example
+is &lt;code&gt;map&lt;/code&gt; that maps a closure to the value inside of an &lt;code&gt;Option&amp;lt;T&amp;gt;&lt;/code&gt;&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;let maybe_some_string = Some(String::from(&amp;quot;Hello, World!&amp;quot;));
+let maybe_some_len = maybe_some_string.map(|s| s.len());
+assert_eq!(maybe_some_len, Some(13));
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The &lt;code&gt;unwrap_or&lt;/code&gt; combinator is useful for providing a default value when an &lt;code&gt;Option&lt;/code&gt; value is
+&lt;code&gt;None&lt;/code&gt;.&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;pub fn unwrap_or(self, def: T) -&amp;gt; T {
+        match self {
+            Some(x) =&amp;gt; x,
+            None =&amp;gt; def,
+        }
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The &lt;code&gt;and_then&lt;/code&gt; combinator makes is to compose distinct computations, essentially by chaining.&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;fn square(x: u32) -&amp;gt; Option&amp;lt;u32&amp;gt; { Some(x * x) }
+assert_eq!(Some(2).and_then(square).and_then(square), Some(16));
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The &lt;code&gt;Result&lt;/code&gt; type is a richer version of &lt;code&gt;Option&lt;/code&gt;. It expresses the &lt;strong&gt;possibility of error&lt;/strong&gt;.&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;enum Result&amp;lt;T, E&amp;gt; {
+   Ok(T),
+   Err(E),
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;Just like &lt;code&gt;Option&lt;/code&gt;, &lt;code&gt;Result&lt;/code&gt; implements lots of combinators including &lt;code&gt;map&lt;/code&gt;, &lt;code&gt;map_err&lt;/code&gt;, &lt;code&gt;unwrap_or&lt;/code&gt;
+and &lt;code&gt;and_then&lt;/code&gt;. The &lt;code&gt;Result&lt;/code&gt; type also supports aliases when dealing with many references to one
+&lt;code&gt;Result&lt;/code&gt;. A common alias is &lt;code&gt;io::Result&lt;/code&gt;.&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;pub type Result&amp;lt;T&amp;gt; = result::Result&amp;lt;T, Error&amp;gt;;
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;Multiple errors can be handled by having a custom &lt;code&gt;enum&lt;/code&gt; to represent &lt;strong&gt;one of many
+possibilities&lt;/strong&gt;.&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;#[derive(Debug)]
+enum CliError {
+    Io(io::Error),
+    Parse(num::ParseIntError),
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The standard library defines two traits for error handing: &lt;code&gt;std::error::Error&lt;/code&gt; and
+&lt;code&gt;std::convert::From&lt;/code&gt;. The first one for describing errors and the latter for conversion.&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;impl From&amp;lt;io::Error&amp;gt; for CliError {
+    fn from(err: io::Error) -&amp;gt; CliError {
+        CliError::Io(err)
+    }
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The &lt;a href=&quot;https://doc.rust-lang.org/std/macro.try.html&quot;&gt;&lt;code&gt;try!&lt;/code&gt;&lt;/a&gt; macro is useful for encapsulating case analysis, control flow and error type
+conversion.&lt;/p&gt;
+&lt;h2&gt;&lt;a href=&quot;#jan-20-2018&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;jan-20-2018&quot;&gt;&lt;/a&gt;Jan-20-2018&lt;/h2&gt;
+&lt;p&gt;&lt;strong&gt;Title:&lt;/strong&gt; &lt;a href=&quot;https://hoverbear.org/2016/10/12/rust-state-machine-pattern/&quot;&gt;Pretty State Machine Patterns in Rust&lt;/a&gt;&lt;/p&gt;
+&lt;p&gt;A State Machine is any &lt;strong&gt;machine&lt;/strong&gt; which has a set of &lt;strong&gt;states&lt;/strong&gt; and &lt;strong&gt;transitions&lt;/strong&gt; defined between them.
+When we talk about a machine we’re referring to the abstract concept of something which does something.&lt;/p&gt;
+&lt;p&gt;States are a way to reason about where a machine is in its process. For example, we can think about a
+bottle filling machine. The machine is in a &lt;strong&gt;waiting&lt;/strong&gt; state when it is waiting for a
+new bottle. Once it detects a bottle it moves to the &lt;strong&gt;filling&lt;/strong&gt; state. Upon detecting the bottle is
+filled it enters the &lt;strong&gt;done&lt;/strong&gt; state. After the bottle has left the machine we return to the &lt;strong&gt;waiting&lt;/strong&gt; state.&lt;/p&gt;
+&lt;pre&gt;&lt;code&gt;  +---------+   +---------+   +------+
+  |         |   |         |   |      |
+  | Waiting +--&amp;gt;+ Filling +--&amp;gt;+ Done |
+  |         |   |         |   |      |
+  +----+----+   +---------+   +--+---+
+       ^                         |
+       +-------------------------+
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;When designing a state machine in Rust, we ideally want these characteristics:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;Can only be in one state at a time.&lt;/li&gt;
+&lt;li&gt;Each state should able have its own associated values if required.&lt;/li&gt;
+&lt;li&gt;Transitioning between states should have well defined semantics.&lt;/li&gt;
+&lt;li&gt;It should be possible to have some level of shared state.&lt;/li&gt;
+&lt;li&gt;Only explicitly defined transitions should be permitted.&lt;/li&gt;
+&lt;li&gt;Changing from one state to another should consume the state so it can no longer be used.&lt;/li&gt;
+&lt;li&gt;We shouldn't need to allocate memory for all states.&lt;/li&gt;
+&lt;li&gt;Any error messages should be easy to understand.&lt;/li&gt;
+&lt;li&gt;We shouldn't need to resort to heap allocations to do this.&lt;/li&gt;
+&lt;li&gt;The type system should be harnessed to our greatest ability.&lt;/li&gt;
+&lt;li&gt;As many errors as possible should be at compile-time.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;An approach to achieve is use a combination of generics, &lt;code&gt;enum&lt;/code&gt;s and shared values.&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;fn main() {
+    let mut the_factory = Factory::new();
+    the_factory.bottle_filling_machine = the_factory.bottle_filling_machine.step();
+}
+
+// This is our state machine for our Bottle Filling Machine
+struct BFM&amp;lt;S&amp;gt; {
+    shared_value: usize,
+    state: S
+}
+
+// The following states can be the 'S' in StateMachine&amp;lt;S&amp;gt;
+struct Waiting {
+    waiting_time: std::time::Duration,
+}
+
+struct Filling {
+    rate: usize,
+}
+
+struct Done;
+
+// Our Machine starts in the 'Waiting' state.
+impl BFM&amp;lt;Waiting&amp;gt; {
+    fn new(shared_value: usize) -&amp;gt; Self {
+        BFM {
+            shared_value: shared_value,
+            state: Waiting {
+                waiting_time: std::time::Duration::new(0, 0),
+            }
+        }
+    }
+}
+
+// The following are the defined transitions between states.
+impl From&amp;lt;BFM&amp;lt;Waiting&amp;gt;&amp;gt; for BFM&amp;lt;Filling&amp;gt; {
+    fn from(val: BFM&amp;lt;Waiting&amp;gt;) -&amp;gt; BFM&amp;lt;Filling&amp;gt; {
+        BFM {
+            shared_value: val.shared_value,
+            state: Filling {
+                rate: 1,
+            }
+        }
+    }
+}
+
+impl From&amp;lt;BFM&amp;lt;Filling&amp;gt;&amp;gt; for BFM&amp;lt;Done&amp;gt; {
+    fn from(val: BFM&amp;lt;Filling&amp;gt;) -&amp;gt; BFM&amp;lt;Done&amp;gt; {
+        BFM {
+            shared_value: val.shared_value,
+            state: Done,
+        }
+    }
+}
+
+impl From&amp;lt;BFM&amp;lt;Done&amp;gt;&amp;gt; for BFM&amp;lt;Waiting&amp;gt; {
+    fn from(val: BFM&amp;lt;Done&amp;gt;) -&amp;gt; BFM&amp;lt;Waiting&amp;gt; {
+        BFM {
+            shared_value: val.shared_value,
+            state: Waiting {
+                waiting_time: std::time::Duration::new(0, 0),
+            }
+        }
+    }
+}
+
+
+// Here is we're building an enum so we can contain this state machine in a parent.
+enum MachineWrapper {
+    Waiting(BFM&amp;lt;Waiting&amp;gt;),
+    Filling(BFM&amp;lt;Filling&amp;gt;),
+    Done(BFM&amp;lt;Done&amp;gt;),
+}
+
+// Defining a function which shifts the state along.
+impl MachineWrapper {
+    fn step(mut self) -&amp;gt; Self {
+        self = match self {
+            MachineWrapper::Waiting(val) =&amp;gt; MachineWrapper::Filling(val.into()),
+            MachineWrapper::Filling(val) =&amp;gt; MachineWrapper::Done(val.into()),
+            MachineWrapper::Done(val) =&amp;gt; MachineWrapper::Waiting(val.into()),
+        };
+        self
+    }
+}
+
+// The structure with a parent.
+struct Factory {
+    bottle_filling_machine: MachineWrapper,
+}
+
+impl Factory {
+    fn new() -&amp;gt; Self {
+        Factory {
+            bottle_filling_machine: MachineWrapper::Waiting(BFM::new(0)),
+        }
+    }
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;h2&gt;&lt;a href=&quot;#jan-21-2018&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;jan-21-2018&quot;&gt;&lt;/a&gt;Jan-21-2018&lt;/h2&gt;
+&lt;p&gt;&lt;strong&gt;Title:&lt;/strong&gt; &lt;a href=&quot;http://huonw.github.io/blog/2015/05/finding-closure-in-rust/&quot;&gt;Finding Closure in Rust&lt;/a&gt;&lt;/p&gt;
+&lt;p&gt;A &lt;strong&gt;closure&lt;/strong&gt; is a function that can directly use variables from the scope in which it is defined.
+This is often described as the closure &lt;em&gt;closing over&lt;/em&gt; or &lt;em&gt;capturing&lt;/em&gt; variables.&lt;/p&gt;
+&lt;p&gt;Rust has C++11 inspired closures using the trait system, allowing for:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;allocation-less statically dispatched closures&lt;/li&gt;
+&lt;li&gt;choice to opt-in to type-erasure and dynamic dispatch&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;Syntactically, a closure in Rust is an anonymous function value defined similar to Ruby, with
+pipes.&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;fn main() {
+    let mut v = [5, 4, 1, 3, 2];
+    v.sort_by(|a, b| a.cmp(b)); // closure `|arguments...| body`
+    assert!(v == [1, 2, 3, 4, 5]);
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;How do closures work? The definition of &lt;code&gt;Option::map&lt;/code&gt; (an example closure implementation) is:&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;impl&amp;lt;X&amp;gt; Option&amp;lt;X&amp;gt; {
+    pub fn map&amp;lt;Y, F: FnOnce(X) -&amp;gt; Y&amp;gt;(self, f: F) -&amp;gt; Option&amp;lt;Y&amp;gt; {
+        match self {
+            Some(x) =&amp;gt; Some(f(x)),
+            None =&amp;gt; None
+        }
+    }
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The &lt;code&gt;FnOnce&lt;/code&gt; trait and its close cousins &lt;code&gt;Fn&lt;/code&gt; and &lt;code&gt;FnMut&lt;/code&gt; represent how the variables are captured by the
+closure:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;code&gt;Fn&lt;/code&gt;: &lt;strong&gt;by reference&lt;/strong&gt;&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;FnMut&lt;/code&gt;: &lt;strong&gt;by mutable reference&lt;/strong&gt;&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;FnOnce&lt;/code&gt;: &lt;strong&gt;by value&lt;/strong&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;By default, the compiler looks at the closure body to see how captured variables are used, and uses
+that to infers how variables should be captured, that is deciding between &lt;code&gt;Fn&lt;/code&gt;, &lt;code&gt;FnMut&lt;/code&gt; and
+&lt;code&gt;FnOnce&lt;/code&gt;.&lt;/p&gt;
+&lt;p&gt;The &lt;code&gt;move&lt;/code&gt; keyword is used to define an &lt;strong&gt;escaping&lt;/strong&gt; closure, one that might leave the stack frame
+where it is created.&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;use std::thread;
+thread::spawn(move || {
+    // some work here
+    });
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The use of traits for closures allows one to opt-in into dynamic dispatch via trait objects:&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;let mut closures: Vec&amp;lt;Box&amp;lt;Fn()&amp;gt;&amp;gt; = vec![];
+
+let text = &amp;quot;second&amp;quot;;
+
+closures.push(Box::new(|| println!(&amp;quot;first&amp;quot;)));
+closures.push(Box::new(|| println!(&amp;quot;{}&amp;quot;, text)));
+closures.push(Box::new(|| println!(&amp;quot;third&amp;quot;)));
+
+for f in &amp;amp;closures {
+    f(); // first / second / third
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;h2&gt;&lt;a href=&quot;#jan-22-2018-1&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;jan-22-2018-1&quot;&gt;&lt;/a&gt;Jan-22-2018-1&lt;/h2&gt;
+&lt;p&gt;&lt;strong&gt;Title:&lt;/strong&gt; &lt;a href=&quot;https://vorner.github.io/difficult.html&quot;&gt;Why is Rust difficult?&lt;/a&gt;&lt;/p&gt;
+&lt;p&gt;Rust is considered difficult to learn by many people. However, it's not necessarily a bad thing if
+you get something in return for the investment.&lt;/p&gt;
+&lt;p&gt;Rust aims to &lt;strong&gt;solve hard problems&lt;/strong&gt;; it's therefore harder than languages that solve simpler problems,
+such as Lua.&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;p&gt;On the other hand, if you declare upfront that your language needs to be able to solve any hard
+problem anyone thinks of, run fast and be safe to use then you’ll probably get your wish, but
+it’ll hardly be simple.&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;The Rust language is &lt;strong&gt;honest&lt;/strong&gt;. It does not abstract away problems from the programmer; a beginner
+therefore has to grasp the complete complexity of the problem.&lt;/p&gt;
+&lt;p&gt;Rust is &lt;strong&gt;different&lt;/strong&gt;. Features such as ownership, traits and lifetimes makes Rust stand out from
+other languages.&lt;/p&gt;
+&lt;p&gt;The compiler is very &lt;strong&gt;strict&lt;/strong&gt;. The Rust compiler requires your code to be typed, memory safe and
+be free of data races. Even having dead code is an issue!&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;p&gt;But at the same time, it makes learning it a bit harder, because it insists on you learning
+everything needed to write a good program. An average is not acceptable.&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;There is also a general &lt;strong&gt;perception&lt;/strong&gt; that Rust is hard.&lt;/p&gt;
+&lt;p&gt;Despite all this, it easy to quickly come up to speed, find the language interesting, become a
+better programmer (the compile is a strict teacher) and meet some very nice people in the
+community.&lt;/p&gt;
+&lt;h2&gt;&lt;a href=&quot;#jan-22-2018-2&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;jan-22-2018-2&quot;&gt;&lt;/a&gt;Jan-22-2018-2&lt;/h2&gt;
+&lt;p&gt;&lt;strong&gt;Title:&lt;/strong&gt; &lt;a href=&quot;https://www.ncameron.org/blog/macros/&quot;&gt;Macros&lt;/a&gt;&lt;/p&gt;
+&lt;p&gt;Macros are a syntactic language feature. A macro use is expanded according to a macro definition.
+They are like functions, however, their expansions happens entirely at compile time. In Rust this
+after the parsing step of compilation.&lt;/p&gt;
+&lt;p&gt;Rust has a hygienic macro system - it preserves the scoping of the macro definition preventing
+shadowing of variables during macro expansion.&lt;/p&gt;
+&lt;p&gt;Macros can be implemented as simple textual substitution, by manipulating tokens after lexing, or
+by manipulating the AST (Abstract Syntax Tree) after parsing. This also depends on how macros are
+defined. &lt;code&gt;macro_rules&lt;/code&gt; in Rust allow for pattern matching of arguments in the macro definition.
+Rust macros are lexed into tokens before expansion and parsed afterwards.&lt;/p&gt;
+&lt;p&gt;In a &lt;strong&gt;procedural macro system&lt;/strong&gt;, a macro is defined as a program. When its use is encountered, the
+macro is executed with the macro arguments as input. The macro use is then replaced by the result
+of the execution.&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;proc_macro! foo(x) {  
+    let mut result = String::new();
+    for i in 0..10 {
+        result.push_str(x)
+    }
+    result
+}
+
+fn main() {  
+    let a = &amp;quot;foo!(bar)&amp;quot;; // Hand-waving about string literals.
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;will expand to&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;fn main() {  
+    let a = &amp;quot;barbarbarbarbarbarbarbarbarbar&amp;quot;;
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;blockquote&gt;
+&lt;p&gt;A procedural macro is a generalisation of the syntactic macros described so far. One could imagine
+implementing a syntactic macro as a procedural macro by returning the text of the syntactic macro
+after manually substituting the arguments.&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;h2&gt;&lt;a href=&quot;#jan-23-2018&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;jan-23-2018&quot;&gt;&lt;/a&gt;Jan-23-2018&lt;/h2&gt;
+&lt;p&gt;&lt;strong&gt;Title:&lt;/strong&gt; &lt;a href=&quot;https://www.ncameron.org/blog/macros-in-rust-pt1/&quot;&gt;Macros in Rust pt1&lt;/a&gt;&lt;/p&gt;
+&lt;p&gt;Rust offers an array of macro features:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;code&gt;macro_rules!&lt;/code&gt; macros&lt;/li&gt;
+&lt;li&gt;procedural macros&lt;/li&gt;
+&lt;li&gt;built-in macros such as &lt;code&gt;println!&lt;/code&gt; and &lt;code&gt;#[derive()]&lt;/code&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;&lt;code&gt;macro_rules!&lt;/code&gt; lets you write syntactic macros based on pattern matching. They are used in a
+function like style, the &lt;code&gt;!&lt;/code&gt; distinguishes them from regular functions.&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;macro_rules! hello {  
+    () =&amp;gt; { println!(&amp;quot;hello world&amp;quot;); }
+}
+
+fn main() {  
+    hello!();
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The above gets expanded into:&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;fn main() {  
+    println!(&amp;quot;hello world&amp;quot;);
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;To illustrate pattern matching in macros:&lt;/p&gt;
+&lt;p&gt;This code snippet&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;
+macro_rules! my_print {  
+    (foo &amp;lt;&amp;gt; $e: expr) =&amp;gt; { println!(&amp;quot;FOOOOOOOOOOOOoooooooooooooooooooo!! {}&amp;quot;, $e); };
+    ($e: expr) =&amp;gt; { println!(&amp;quot;{}&amp;quot;, $e); };
+    ($i: ident, $e: expr) =&amp;gt; {
+        let $i = {
+            let a = $e;
+            println!(&amp;quot;{}&amp;quot;, a);
+            a
+        };
+    };
+}
+
+fn main() {  
+    my_print!(x, 30 + 12);
+    my_print!(&amp;quot;hello!&amp;quot;);
+    my_print!(foo &amp;lt;&amp;gt; &amp;quot;hello!&amp;quot;);
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;Outputs&lt;/p&gt;
+&lt;pre&gt;&lt;code&gt;42
+hello!
+FOOOOOOOOOOOOoooooooooooooooooooo!! hello!
+&lt;/code&gt;&lt;/pre&gt;
+&lt;h2&gt;&lt;a href=&quot;#jan-24-2018&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;jan-24-2018&quot;&gt;&lt;/a&gt;Jan-24-2018&lt;/h2&gt;
+&lt;p&gt;&lt;strong&gt;Title:&lt;/strong&gt; &lt;a href=&quot;https://www.ncameron.org/blog/macros-in-rust-pt2/&quot;&gt;Macros in Rust pt2&lt;/a&gt;&lt;/p&gt;
+&lt;p&gt;Procedural macros are implemented using pure Rust code at the meta level. They are powerful since
+the output can be anything you can express as an Abstract Syntax Tree.&lt;/p&gt;
+&lt;p&gt;At the moment procedural macros are used to write custom derive. They also need to be in their own
+crate of the &lt;code&gt;proc-macro&lt;/code&gt; crate type.&lt;/p&gt;
+&lt;p&gt;An example procedural macro implementation:&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;extern crate proc_macro;
+extern crate syn;
+#[macro_use]
+extern crate quote;
+
+use proc_macro::TokenStream;
+
+#[proc_macro_derive(HelloWorld)]
+pub fn hello_world(input: TokenStream) -&amp;gt; TokenStream {
+    // Construct a string representation of the type definition
+    let s = input.to_string();
+    
+    // Parse the string representation
+    let ast = syn::parse_derive_input(&amp;amp;s).unwrap();
+
+    // Build the impl
+    let gen = impl_hello_world(&amp;amp;ast);
+    
+    // Return the generated impl
+    gen.parse().unwrap()
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The &lt;a href=&quot;https://docs.rs/syn/0.12.10/syn/&quot;&gt;&lt;code&gt;syn&lt;/code&gt;&lt;/a&gt; and &lt;a href=&quot;https://docs.rs/quote/0.4.2/quote/&quot;&gt;&lt;code&gt;qoute&lt;/code&gt;&lt;/a&gt; crates make it easier to write procedural macros.&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;p&gt;Syn is a parsing library for parsing a stream of Rust tokens into a syntax tree of Rust source code.&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;The &lt;code&gt;qoute!&lt;/code&gt; macro is used to turn Rust syntax tree data structures into tokens of source code.&lt;/p&gt;
+&lt;p&gt;Error handling inside procedural macros is through the &lt;code&gt;panic!&lt;/code&gt; macro.&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;fn impl_hello_world(ast: &amp;amp;syn::DeriveInput) -&amp;gt; quote::Tokens {
+    let name = &amp;amp;ast.ident;
+    // Check if derive(HelloWorld) was specified for a struct
+    if let syn::Body::Struct(_) = ast.body {
+        // Yes, this is a struct
+        quote! {
+            impl HelloWorld for #name {
+                fn hello_world() {
+                    println!(&amp;quot;Hello, World! My name is {}&amp;quot;, stringify!(#name));
+                }
+            }
+        }
+    } else {
+        //Nope. This is an Enum. We cannot handle these!
+       panic!(&amp;quot;#[derive(HelloWorld)] is only defined for structs, not for enums!&amp;quot;);
+    }
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;This post also borrows from the &lt;a href=&quot;https://doc.rust-lang.org/book/first-edition/procedural-macros.html&quot;&gt;rusk book&lt;/a&gt;&lt;/p&gt;
+&lt;h2&gt;&lt;a href=&quot;#jan-25-2018&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;jan-25-2018&quot;&gt;&lt;/a&gt;Jan-25-2018&lt;/h2&gt;
+&lt;p&gt;&lt;strong&gt;Title:&lt;/strong&gt; &lt;a href=&quot;https://ncameron.org/blog/macros-in-rust-pt3/&quot;&gt;Macros in Rust pt3&lt;/a&gt;&lt;/p&gt;
+&lt;p&gt;This post is about &lt;strong&gt;macro hygiene in Rust&lt;/strong&gt;&lt;/p&gt;
+&lt;p&gt;A hygienic macro system preserves the scoping of a macro definition. The following examples
+illustrate that:&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;macro_rules! foo {  
+    () =&amp;gt; {
+        let x = 0;
+    }
+}
+fn main() {  
+    let mut x = 42;
+    foo!();
+    println!(&amp;quot;{}&amp;quot;, x);
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The above code prints &lt;code&gt;42&lt;/code&gt; as the output. Here the &lt;code&gt;x&lt;/code&gt; defined in &lt;code&gt;main&lt;/code&gt; and the one in &lt;code&gt;foo!&lt;/code&gt; are
+disjoint.&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;macro_rules! foo {  
+    ($x: ident) =&amp;gt; {
+        $x = 0;
+    }
+}
+fn main() {  
+    let mut x = 42;
+    foo!(x);
+    println!(&amp;quot;{}&amp;quot;, x);
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;This prints &lt;code&gt;0&lt;/code&gt;. &lt;code&gt;x&lt;/code&gt; is passed in to the macro and then modified.&lt;/p&gt;
+&lt;p&gt;Rust is hygienic with respect to variables scoping, labels, feature gates and stability checks.&lt;/p&gt;
+&lt;p&gt;There are some limitations:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;hygiene only works on expression variables and labels.&lt;/li&gt;
+&lt;li&gt;no hygiene is applied to lifetimes or type variables or types themselves.&lt;/li&gt;
+&lt;li&gt;no hygiene with respect to privacy and safety i.e. in &lt;code&gt;unsafe&lt;/code&gt; blocks.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;The implementation of hygienic macro system is a bit complex.
+Much of the work happens during the &lt;strong&gt;macro expansion&lt;/strong&gt; and &lt;strong&gt;name resolution&lt;/strong&gt; phases of Rust
+code compilation.&lt;/p&gt;
+&lt;p&gt;The macro expansion phase is hygienic. During name resolution syntactic names are resolved into
+definitions. For unhygienic system, this resolutions is basically string equality. In Rust
+however, we consider identifiers(names) and a syntax context. To check if two identifiers are
+equal, they are resolved in the respective syntax contexts and the results compared.
+The syntax context is added to an identifier during the macro expansion phase.&lt;/p&gt;
+&lt;p&gt;The macro hygiene algorithm used in Rust comes from the &lt;a href=&quot;https://www.cs.utah.edu/plt/publications/jfp12-draft-fcdf.pdf&quot;&gt;Macros That Work Together&lt;/a&gt; paper. This
+mtwt algorithm is used during macro expansion. The whole syntax tree of a crate is walked,
+expanding macro uses and applying the algorithm to all identifiers.&lt;/p&gt;
+&lt;p&gt;Mtwt has two key concepts - marking and renaming. Marking is applied when we expand a macro and
+renaming when we enter a new scope. A syntax context under mtwt consists of a series of marks and
+renames.&lt;/p&gt;
+&lt;h2&gt;&lt;a href=&quot;#jan-26-2018&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;jan-26-2018&quot;&gt;&lt;/a&gt;Jan-26-2018&lt;/h2&gt;
+&lt;p&gt;&lt;strong&gt;Title:&lt;/strong&gt; &lt;a href=&quot;https://ncameron.org/blog/macros-in-rust-pt4/&quot;&gt;Macros in Rust pt4&lt;/a&gt;&lt;/p&gt;
+&lt;p&gt;This post is about stuff around the import, export and modularisation of macros.&lt;/p&gt;
+&lt;p&gt;The order of items matters for macros. You can only refer to a macro after it is declared.&lt;/p&gt;
+&lt;p&gt;Macros defined inside a module cannot be used unless the module is annotated with &lt;code&gt;#[macro_use]&lt;/code&gt;. Macros defined before and outside a module can be used without importation.&lt;/p&gt;
+&lt;p&gt;Macros are encapsulated by crates - they must be explicitly imported and exported. When importing macros from a crate, you annotate &lt;code&gt;extern crate&lt;/code&gt; with &lt;code&gt;#[macro_use]&lt;/code&gt;.&lt;/p&gt;
+&lt;p&gt;Program representations that matter in macros:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;source text&lt;/li&gt;
+&lt;li&gt;token trees&lt;/li&gt;
+&lt;li&gt;abstract syntax tree&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;&lt;strong&gt;Source text&lt;/strong&gt; is the text passed to the compiler. It's stored in a codemap and is immutable. Once it's lexed, it hardly used by the compiler. It's main use is in error messages.&lt;/p&gt;
+&lt;p&gt;&lt;strong&gt;Lexing&lt;/strong&gt; is the first stage of compilation where source text is transformed into &lt;strong&gt;tokens&lt;/strong&gt;.&lt;/p&gt;
+&lt;p&gt;Parsing a token tree gives an &lt;strong&gt;abstract syntax tree(AST)&lt;/strong&gt;. An AST is a tree of nodes representing the source text in a concrete way.&lt;/p&gt;
+&lt;p&gt;The three main phases of compilation are:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;parsing and expansion&lt;/li&gt;
+&lt;li&gt;analysis, and&lt;/li&gt;
+&lt;li&gt;code generation&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;&lt;strong&gt;libsyntax&lt;/strong&gt; implements lexing, parsing and macro expansion. This is purely syntactic. The result of this is an AST. During lexing and parsing, macro use is left as is in the AST. The macro expansion phase walks the AST and performs substitutions while maintaining hygiene.&lt;/p&gt;
+&lt;p&gt;&lt;strong&gt;Spans&lt;/strong&gt; (&lt;em&gt;a span identifies a section of code in the source text&lt;/em&gt;)  are used to tracing macros in order to highlight source code in error messages. Due to the possibility of nested macros, the are also &lt;strong&gt;expansion traces&lt;/strong&gt; table that holds a trace of each macro expansion.&lt;/p&gt;
+&lt;h2&gt;&lt;a href=&quot;#jan-27-2018&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;jan-27-2018&quot;&gt;&lt;/a&gt;Jan-27-2018&lt;/h2&gt;
+&lt;p&gt;&lt;strong&gt;Title:&lt;/strong&gt; &lt;a href=&quot;http://smallcultfollowing.com/babysteps/blog/2015/05/05/where-rusts-enum-shines/&quot;&gt;Virtual Structs Part 1: Where Rust's enum shines&lt;/a&gt;&lt;/p&gt;
+&lt;p&gt;This post is about why &lt;strong&gt;Rust enums are powerful.&lt;/strong&gt;&lt;/p&gt;
+&lt;p&gt;Rust enums are more powerful compared to there equivalent in C++.
+The key difference between Rust and C++ is the size of the enum types. In Rust, the size of
+an enum instance is equal to &lt;strong&gt;the maximum of its variants&lt;/strong&gt;, which means that we can pass
+enums around by value and know that we have enough space to store any variant of the enum.
+In contrast, when using classes in C++, the size of an enum instance will vary,
+&lt;strong&gt;depending on what specific variance it is&lt;/strong&gt;. C++ requires passing around enums using a
+pointer, since we don't know how much space is need upfront.&lt;/p&gt;
+&lt;p&gt;This flexibility makes it easy to extend Rust's enums with ease.&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;enum ErrorCode {
+    FileNotFound,
+    UnexpectedChar
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;can be extended to&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;enum ErrorCode {
+    FileNotFound,
+    UnexpectedChar { expected: Vec&amp;lt;String&amp;gt;, found: char }
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;In  C++ (or Java, Scala, etc) one would require some sort of class hierarchy (&lt;em&gt;more complex&lt;/em&gt;) to achieve this.&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;p&gt;&lt;strong&gt;Rust really relies deeply on the flat, uniform layout for enums&lt;/strong&gt;. For example, every time you make
+a nullable pointer like &lt;code&gt;Option&amp;lt;&amp;amp;T&amp;gt;&lt;/code&gt;, you are taking advantage of the fact that options are laid out
+flat in memory, whether they are &lt;code&gt;None&lt;/code&gt; or &lt;code&gt;Some&lt;/code&gt;.&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;h2&gt;&lt;a href=&quot;#jan-28-2018&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;jan-28-2018&quot;&gt;&lt;/a&gt;Jan-28-2018&lt;/h2&gt;
+&lt;p&gt;&lt;strong&gt;Title:&lt;/strong&gt; &lt;a href=&quot;http://smallcultfollowing.com/babysteps/blog/2015/05/29/classes-strike-back/&quot;&gt;Virtual Structs Part 2: Classes strike back&lt;/a&gt;&lt;/p&gt;
+&lt;p&gt;This post is about the &lt;strong&gt;shortcomings of enums&lt;/strong&gt; in Rust, vs a class based approach.&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Memory bloat&lt;/strong&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;Enums have a size equal to their largest variant, this is sometimes a handicap. Avoid this memory
+bloat enum variants have to interned more so those with a lot of associated data. On the other hand
+a classes approach would allow exact memory size.&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Common fields&lt;/strong&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;To have common fields across enums variants requires having a struct wrapper around the enum to
+provide the shared fields. This doesn't feel natural. An class-based approach would simply have a
+base class containing the common fields that is inherited by the variants.&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Initialization of common fields&lt;/strong&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;If an enum has a lot of variants, being able to extract the common initialization code into a
+function is important.
+Since Rust lacks special constructors, there's no way to write a function that initializes only the
+common fields of the enum variants.
+C++ and Java use initialization based on constructors. This approach is problematic but it makes it
+helps abstract over the initialization of base class fields from subclass fields.&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Refinement types&lt;/strong&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;Rust currently lacks a way to &amp;quot;refine&amp;quot; the type of an enum to indicate the set of variants that it
+might be i.e. we can't make each variant its own type. Classes allow you to achieve this through
+inheritance.&lt;/p&gt;
+&lt;h2&gt;&lt;a href=&quot;#jan-29-2018&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;jan-29-2018&quot;&gt;&lt;/a&gt;Jan-29-2018&lt;/h2&gt;
+&lt;p&gt;&lt;strong&gt;Title:&lt;/strong&gt; &lt;a href=&quot;http://smallcultfollowing.com/babysteps/blog/2015/08/20/virtual-structs-part-3-bringing-enums-and-structs-together/&quot;&gt;Virtual Structs Part 3: Bringing Enums and Structs Together&lt;/a&gt;&lt;/p&gt;
+&lt;p&gt;This post is about a proposal of &lt;strong&gt;bridging enums and structs in Rust.&lt;/strong&gt;&lt;/p&gt;
+&lt;p&gt;Enums and structs can be generalized into a single concept i.e. an algebraic data type. Enums can
+be interpreted into a tree or hierarchy. This idea can be thought of as &lt;em&gt;type hierarchy.&lt;/em&gt;&lt;/p&gt;
+&lt;p&gt;The &lt;code&gt;Option&lt;/code&gt; enum:&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;enum Option&amp;lt;T&amp;gt; {
+    Some(T), None
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;can be represented as:&lt;/p&gt;
+&lt;pre&gt;&lt;code&gt;enum Option&amp;lt;T&amp;gt;
+|
++- struct None&amp;lt;T&amp;gt;
++- struct Some&amp;lt;T&amp;gt;
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;Enum declarations can also be extended with the ability to have fields as well as variants:&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;enum TypeData&amp;lt;T&amp;gt; {
+    // Common fields:
+    id: u32,
+    flags: u32,
+    ...,
+
+    // Variants:
+    Int { },
+    Uint { },
+    ...
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;Enums can also be made unsized, allowing each value to be sized to a particular variant.&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;p&gt;One interesting question is whether we can concisely state conditions in which one would prefer to
+have “precise variant sizes” (class-like) vs “largest variant” (enum).
+I think the “precise sizes” approach is better when the following apply:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;A recursive type (like a tree), which tends to force boxing anyhow. Examples: the AST or types in the compiler, DOM in servo, a GUI.&lt;/li&gt;
+&lt;li&gt;Instances never change what variant they are.&lt;/li&gt;
+&lt;li&gt;Potentially wide variance in the sizes of the variants.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;It would also be great to use pattern matching as an elegant downcasting mechanism.&lt;/p&gt;
+&lt;p&gt;Enums types can also be used as bounds - making them more capable and convenient.&lt;/p&gt;
+&lt;p&gt;Enums could also have an associated struct type that can be used as a constructor allowing
+initialization of common fields.&lt;/p&gt;
+&lt;p&gt;Finally enums could support subtyping and coercion - this is hard to get right.&lt;/p&gt;
+&lt;h2&gt;&lt;a href=&quot;#jan-30-2018&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;jan-30-2018&quot;&gt;&lt;/a&gt;Jan-30-2018&lt;/h2&gt;
+&lt;p&gt;&lt;strong&gt;Title:&lt;/strong&gt; &lt;a href=&quot;https://blog.rust-lang.org/2016/05/13/rustup.html&quot;&gt;Taking Rust everywhere with rustup&lt;/a&gt;&lt;/p&gt;
+&lt;p&gt;&lt;strong&gt;Cross-compilation&lt;/strong&gt; allows you to develop on one &amp;quot;host&amp;quot; platform, but get a final binary that
+runs on a different &amp;quot;target&amp;quot; platform. Rust aims to make this a no-brainer using rustup.&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;p&gt;At its heart, rustup is a toolchain manager for Rust. It can download and switch between copies
+of the Rust compiler and standard library for all supported platforms, and track Rust’s nightly,
+beta, and release channels, as well as specific versions.&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;rustup's handy commands:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;rustup install toolchain-name&lt;/strong&gt;: allows you to install multiple toolchains eg &lt;code&gt;beta&lt;/code&gt;, &lt;code&gt;nightly&lt;/code&gt;
+and &lt;code&gt;stable&lt;/code&gt;.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;rustup show&lt;/strong&gt;: shows the installed toolchains&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;rustup update&lt;/strong&gt;: updates the toolchains to the latest versions.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;rustup default&lt;/strong&gt;: allows you to set the default toolchain&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;rustup target&lt;/strong&gt;: allows you to add/remove a target to a toolchain&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;&lt;a href=&quot;#jan-31-2018&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;jan-31-2018&quot;&gt;&lt;/a&gt;Jan-31-2018&lt;/h2&gt;
+&lt;p&gt;&lt;strong&gt;Title:&lt;/strong&gt; &lt;a href=&quot;https://manishearth.github.io/blog/2015/05/17/the-problem-with-shared-mutability/&quot;&gt;The Problem With Single-threaded Shared Mutability&lt;/a&gt;&lt;/p&gt;
+&lt;p&gt;This post is about Rust's choice to disallow having multiple mutable aliases to the same data.&lt;/p&gt;
+&lt;p&gt;Rust uses a &lt;strong&gt;Read-Write lock&lt;/strong&gt; pattern to prevent having multiple mutable aliases, the reasons for
+these are:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Prevent memory unsafety&lt;/strong&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;Rust enums can cause segfaults with the RWLock pattern.&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;enum StringOrInt {
+    Str(String),
+    Int(i64)
+}
+
+let x = Str(&amp;quot;Hi!&amp;quot;.to_string()); 
+let y = &amp;amp;mut x; 
+
+if let Str(ref insides) = x { 
+    *y = Int(1); 
+    println!(&amp;quot;x says: {}&amp;quot;, insides); 
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;blockquote&gt;
+&lt;p&gt;Here, we invalidated the insides reference because setting x to Int(1) meant that there is no longer a
+string inside it. However, insides is still a reference to a String, and the generated assembly would try
+to dereference the memory location where the pointer to the allocated string was, and probably end up trying
+to dereference 1 or some nearby data instead, and cause a segfault.&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Prevent Iterator invalidation&lt;/strong&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;let buf = vec![1,2,3,4];
+
+for i in &amp;amp;buf {
+    buf.push(i);
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;Iterator invalidation involves consuming iterators whilst modifying their underlying dataset.
+The code snippet above would loop infinitely due to this. Rust prevents this from happening.&lt;/p&gt;
+&lt;p&gt;Apart from infinite looping, reference invalidation would occur once the vector overflows its
+capacity and is reallocated.&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Prevent data corruption/ race?&lt;/strong&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;blockquote&gt;
+&lt;p&gt;Aliasing with mutability in a sufficiently complex, single-threaded program is effectively the
+same thing as accessing data shared across multiple threads without a lock&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;The above reasons make it possible to write safe abstractions, even for generic code.&lt;/p&gt;
+&lt;h2&gt;&lt;a href=&quot;#feb-01-2018&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;feb-01-2018&quot;&gt;&lt;/a&gt;Feb-01-2018&lt;/h2&gt;
+&lt;p&gt;&lt;strong&gt;Title:&lt;/strong&gt; &lt;a href=&quot;http://asquera.de/blog/2018-01-29/rust-lifetimes-for-the-uninitialised/&quot;&gt;Rust Lifetimes for the Uninitialised&lt;/a&gt;&lt;/p&gt;
+&lt;p&gt;This post is about &lt;a href=&quot;https://doc.rust-lang.org/book/second-edition/ch10-03-lifetime-syntax.html&quot;&gt;Lifetimes in Rust&lt;/a&gt;.&lt;/p&gt;
+&lt;p&gt;Ownership dictates that every piece of data is exclusively owned by another part of the program.
+Once ownership ends, the value is dropped. This gives us two points: introduction of the data into
+the program (initialisation) and removal (dropping). The interesting thing in Rust is that those two
+points are always clearly present. The range between those points is the region the binding and
+it's associated value is &lt;em&gt;alive&lt;/em&gt;, its &lt;em&gt;lifetime&lt;/em&gt;.&lt;/p&gt;
+&lt;p&gt;Rust provides has &lt;strong&gt;lifetime elision&lt;/strong&gt; that makes lifetime annotations unnecessary for common
+use cases.&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;p&gt;A common problem I see in trainings or the Hack &amp;amp; Learn is that presented with a lifetime problem,
+people start messing around with lifetime syntax. This is often the wrong approach. It is always
+the wrong approach if you don't fully understand what the compiler calls you out on. It has
+probably found an issue you haven't thought about, making a borrow invalid.&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;Explicit lifetimes are needed everywhere where situations are unclear, such as in
+&lt;a href=&quot;https://doc.rust-lang.org/beta/std/primitive.str.html#method.split&quot;&gt;&lt;code&gt;std::str.split&lt;/code&gt;&lt;/a&gt; that iteratively hands out references to subslices of a string. Since
+&lt;code&gt;split&lt;/code&gt; does not copy strings, lifetime annotations are required to ensure that the strings are not
+dropped while the iterator still exists.&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;p&gt;Remember the two golden rules:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;Don't fiddle with lifetime syntax until you understood what the compiler calls you out on&lt;/li&gt;
+&lt;li&gt;Taking ownership (e.g. through cloning or using Box) isn't cheating&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/blockquote&gt;
+&lt;h2&gt;&lt;a href=&quot;#feb-02-2018&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;feb-02-2018&quot;&gt;&lt;/a&gt;Feb-02-2018&lt;/h2&gt;
+&lt;p&gt;&lt;strong&gt;Title:&lt;/strong&gt; &lt;a href=&quot;https://manishearth.github.io/blog/2017/03/04/what-are-sum-product-and-pi-types/&quot;&gt;What Are Sum, Product, and Pi Types?&lt;/a&gt;&lt;/p&gt;
+&lt;p&gt;In its essence, a &lt;strong&gt;sum type&lt;/strong&gt; is basically an &lt;em&gt;&amp;quot;or&amp;quot;&lt;/em&gt; type. In Rust, they are &lt;strong&gt;enums&lt;/strong&gt;.&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;enum Foo {
+    Str(String),
+    Bool(bool)
+}
+
+let foo = Foo::Bool(true);
+
+// &amp;quot;pattern matching&amp;quot;
+match foo {
+    Str(s) =&amp;gt; /* do something with string `s` */,
+    Bool(b) =&amp;gt; /* do something with bool `b` */,
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The are called sum types because they are the &lt;em&gt;sum&lt;/em&gt; of the constituents types. In the above enum
+&lt;code&gt;Foo = String + bool&lt;/code&gt;.&lt;/p&gt;
+&lt;p&gt;&lt;strong&gt;Product types&lt;/strong&gt; are usually contain every possible combinations of elements of their constituent
+types.&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;
+struct Foo {
+    x: bool,
+    y: u8,
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The set of possible values of &lt;code&gt;Foo&lt;/code&gt; is &lt;code&gt;{(x,y): x is a member of bool, y is a member of u8}&lt;/code&gt; i.e. a
+&lt;strong&gt;cartesian product&lt;/strong&gt;, often represented as &lt;code&gt;Foo = bool * u8&lt;/code&gt;.&lt;/p&gt;
+&lt;p&gt;What is a &lt;strong&gt;Pi type?&lt;/strong&gt;.&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;p&gt;It’s essentially a form of dependent type. A dependent type is when your type can depend on a value.&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;// (the proposed rust syntax)
+fn make_array&amp;lt;const x: u8&amp;gt;() -&amp;gt; Array&amp;lt;bool, x&amp;gt; {
+   // ... 
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;&lt;code&gt;make_array&lt;/code&gt; is a function which can accept any integer and return a different type in each case.&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;p&gt;You can view it as a set of functions, where each function corresponds to a different integer input.&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;struct make_array {
+    make_array_0: fn() -&amp;gt; Array&amp;lt;bool, 0&amp;gt;,
+    make_array_1: fn() -&amp;gt; Array&amp;lt;bool, 1&amp;gt;,
+    make_array_2: fn() -&amp;gt; Array&amp;lt;bool, 2&amp;gt;,
+    // ... 
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;h2&gt;&lt;a href=&quot;#feb-03-2018&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;feb-03-2018&quot;&gt;&lt;/a&gt;Feb-03-2018&lt;/h2&gt;
+&lt;p&gt;&lt;strong&gt;Title:&lt;/strong&gt; &lt;a href=&quot;https://manishearth.github.io/blog/2017/05/14/mentally-modelling-modules/&quot;&gt;Mentally Modelling Modules&lt;/a&gt;&lt;/p&gt;
+&lt;p&gt;The module and import system in Rust is sometimes confusing to deal with, this post explains one
+right way of modelling it.&lt;/p&gt;
+&lt;p&gt;Two rules for resolving confusion on how &lt;strong&gt;imports&lt;/strong&gt; work:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;code&gt;use foo::bar::baz&lt;/code&gt; resolves &lt;code&gt;foo&lt;/code&gt; relative to the root module &lt;code&gt;lib.rs&lt;/code&gt; or &lt;code&gt;main.rs&lt;/code&gt;
+&lt;ul&gt;
+&lt;li&gt;you can resolve relative to the current module by explicitly using &lt;code&gt;use self::foo::bar::baz&lt;/code&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;foo::bar::baz&lt;/code&gt; within your code resolves &lt;code&gt;foo&lt;/code&gt; relative to the current module.
+&lt;ul&gt;
+&lt;li&gt;you can resolve relative to the root by explicitly using &lt;code&gt;::foo::bar::baz&lt;/code&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;How the &lt;strong&gt;import system&lt;/strong&gt; works can be summed up as:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;code&gt;extern crate&lt;/code&gt; and &lt;code&gt;use&lt;/code&gt; will act as if they were defining the imported item in the current module, like a symbolic link&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;use foo::bar::baz&lt;/code&gt; resolves the path relative to the root module&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;foo::bar::baz&lt;/code&gt; in an inline path (i.e. not in a &lt;code&gt;use&lt;/code&gt;) will resolve relative to the current module&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;::foo::bar::baz&lt;/code&gt; will always resolve relative to the root module&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;self::foo::bar::baz&lt;/code&gt; will always resolve relative to the current module&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;super::foo::bar::baz&lt;/code&gt; will always resolve relative to the parent module&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;Basic rules on &lt;strong&gt;module privacy&lt;/strong&gt;:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;If you can access a module, you can access all its public contents.&lt;/li&gt;
+&lt;li&gt;A module can access its child modules, but not recursively.&lt;/li&gt;
+&lt;li&gt;A child module can access its parent module (and it parents) and all their contents.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;&lt;a href=&quot;#feb-04-2018&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;feb-04-2018&quot;&gt;&lt;/a&gt;Feb-04-2018&lt;/h2&gt;
+&lt;p&gt;&lt;strong&gt;Title:&lt;/strong&gt; &lt;a href=&quot;https://manishearth.github.io/blog/2017/01/11/rust-tidbits-what-is-a-lang-item/&quot;&gt;Rust Tidbits: What Is a Lang Item?&lt;/a&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;p&gt;&lt;strong&gt;Lang items&lt;/strong&gt; are a way for the stdlib (and libcore) to define types, traits, functions and other
+items which the complier needs to know about.&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;blockquote&gt;
+&lt;p&gt;The &lt;code&gt;rustc&lt;/code&gt; compiler has certain pluggable operations, that is, functionality that isn't hard-coded into the language,
+but is implemented in libraries, with a special marker to tell the compiler it exists. The marker is the attribute
+&lt;code&gt;#[lang = &amp;quot;...&amp;quot;]&lt;/code&gt; and there are various different values of ..., i.e. various different 'lang items'. &lt;a href=&quot;https://doc.rust-lang.org/1.14.0/book/lang-items.html&quot;&gt;docs link&lt;/a&gt;&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;For example the expression &lt;code&gt;x + y&lt;/code&gt; is desugared into &lt;code&gt;Add::add(x, y)&lt;/code&gt; where the &lt;code&gt;Add&lt;/code&gt; trait is
+marked as a lang item using &lt;code&gt;#[lang = &amp;quot;add&amp;quot;]&lt;/code&gt;. The compiler can then call it whenever it encounters
+the addition operator.&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;#[lang = &amp;quot;add&amp;quot;]
+#[stable(feature = &amp;quot;rust1&amp;quot;, since = &amp;quot;1.0.0&amp;quot;)]
+pub trait Add&amp;lt;RHS=Self&amp;gt; {
+    ...
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;Lang items are usually only required when you do an operation which needs them. Most lang items
+are use in the standard library and thus will be available in your program, such as the &lt;code&gt;add&lt;/code&gt; item.&lt;/p&gt;
+&lt;p&gt;Skipping the standard library using &lt;code&gt;#![no_std]&lt;/code&gt; will usually trigger
+compiler errors about required lang items.&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;#![no_std]
+fn main() {
+ let x = 1 + 3;
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;errors out with:&lt;/p&gt;
+&lt;pre&gt;&lt;code&gt;error: language item required, but not found: `panic_fmt`
+error: language item required, but not found: `eh_personality`
+&lt;/code&gt;&lt;/pre&gt;
+&lt;blockquote&gt;
+&lt;p&gt;Basically, whenever the compiler needs to use special treatment with an item – whether it be
+dispatching calls to functions and trait methods in various situations, conferring special
+semantics to types/traits, or requiring traits to be implemented, the type will be defined
+in the standard library (libstd, libcore, or one of the crates behind the libstd façade),
+and marked as a lang item.&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;h2&gt;&lt;a href=&quot;#feb-15-2018&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;feb-15-2018&quot;&gt;&lt;/a&gt;Feb-15-2018&lt;/h2&gt;
+&lt;p&gt;&lt;strong&gt;Title:&lt;/strong&gt; &lt;a href=&quot;https://huonw.github.io/blog/2015/02/some-notes-on-send-and-sync/&quot;&gt;Some notes on Send and Sync&lt;/a&gt;&lt;/p&gt;
+&lt;p&gt;There are two parts to Rust's support for concurrency:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;
+&lt;p&gt;ownership and lifetimes&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;the &lt;code&gt;Send&lt;/code&gt; and &lt;code&gt;Sync&lt;/code&gt; traits&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;p&gt;These traits capture and control the two most common ways a piece of data be accessed and
+thrown around by threads, dictating whether it is safe to transfer ownership or pass a
+reference into another thread.&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;They are &lt;strong&gt;marker traits&lt;/strong&gt; (&lt;em&gt;have no methods and inherently do not provide any functionality&lt;/em&gt;) for
+certain invariants that types implementing them are expected to fulfill.&lt;/p&gt;
+&lt;p&gt;These invariants are:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;if type &lt;code&gt;T&lt;/code&gt; is &lt;code&gt;Send&lt;/code&gt;, passing it by value to another thread should be safe.&lt;/li&gt;
+&lt;li&gt;if type &lt;code&gt;T&lt;/code&gt; is &lt;code&gt;Sync&lt;/code&gt;, passing its reference &lt;code&gt;&amp;amp;T&lt;/code&gt; to another thread should be safe.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;blockquote&gt;
+&lt;p&gt;These two traits enable a lot of useful concurrency and parallel patterns to be expressed while
+guaranteeing memory safety.&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;If a type &lt;code&gt;T&lt;/code&gt; implements both &lt;code&gt;Sync&lt;/code&gt; and &lt;code&gt;Copy&lt;/code&gt;, then it can also implement &lt;code&gt;Send&lt;/code&gt;.&lt;/p&gt;
+&lt;p&gt;Transferring a &lt;code&gt;&amp;amp;mut T&lt;/code&gt; between threads is guaranteed to be safe if &lt;code&gt;T&lt;/code&gt; implements &lt;code&gt;Send&lt;/code&gt;.&lt;/p&gt;
+&lt;h2&gt;&lt;a href=&quot;#feb-16-2018&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;feb-16-2018&quot;&gt;&lt;/a&gt;Feb-16-2018&lt;/h2&gt;
+&lt;p&gt;&lt;strong&gt;Title:&lt;/strong&gt; &lt;a href=&quot;https://8thlight.com/blog/dave-torre/2015/03/11/the-option-type.html&quot;&gt;The Option Type&lt;/a&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;p&gt;Optional types are basically compiler-enforced null-checks. If a method returns an Option,
+any caller of that method must deal with it in some way or the code won't compile.
+As a bonus, the Option type in the method's signature is a dead giveaway to developers
+that the method may return null.&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;fn get_shortest(names: Vec&amp;lt;&amp;amp;str&amp;gt;) -&amp;gt; Option&amp;lt;&amp;amp;str&amp;gt; {
+    if names.len() &amp;gt; 0 {
+        let mut shortest = names[0];
+        for name in names.iter() {
+            if name.len() &amp;lt; shortest.len() {
+                shortest = *name;
+            }
+        }
+        Some(shortest)
+    } else {
+        None
+    }
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The function above returns an &lt;code&gt;Option&lt;/code&gt; which encloses either a String or None.
+To get the enclosed String from the Option, we use its &lt;code&gt;unwrap&lt;/code&gt; method; this will however panic if
+None is received.&lt;/p&gt;
+&lt;p&gt;A better way is to use a &lt;code&gt;match&lt;/code&gt; statement for unwrapping:&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;fn do_calculation(names: Vec&amp;lt;&amp;amp;str&amp;gt;) -&amp;gt; f64 {
+    match get_shortest(names) {
+        Some(x) =&amp;gt; x.len() as f64 * std::f64::consts::PI,
+        None    =&amp;gt; // handle the null case here
+    }
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;blockquote&gt;
+&lt;p&gt;... optionals are a nice tool to have. They communicate that a null return is possible,
+and force developers to handle that possibility one way or another.&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;h2&gt;&lt;a href=&quot;#feb-19-2018&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;feb-19-2018&quot;&gt;&lt;/a&gt;Feb-19-2018&lt;/h2&gt;
+&lt;p&gt;&lt;strong&gt;Title:&lt;/strong&gt; &lt;a href=&quot;http://huonw.github.io/blog/2015/01/the-sized-trait/&quot;&gt;The Sized Trait&lt;/a&gt;&lt;/p&gt;
+&lt;p&gt;&lt;code&gt;Sized&lt;/code&gt; is a marker trait that is automatically implemented. A type is considered sized if the
+precise size of a value of type is known and fixed at compile time once the real types of the type
+parameters are known i.e. after monomorphisation.&lt;/p&gt;
+&lt;p&gt;For example &lt;code&gt;u8&lt;/code&gt; is one byte and &lt;code&gt;Vec&amp;lt;T&amp;gt;&lt;/code&gt; is 12 or 24 bytes (32 vs 64 bit platforms).&lt;/p&gt;
+&lt;p&gt;Unsized types are known as dynamically sized types (DSTs) and include &lt;code&gt;Trait&lt;/code&gt;s and slices &lt;code&gt;[T]&lt;/code&gt;.
+A slice represents an unknown number of &lt;code&gt;T&lt;/code&gt;s contiguous in memory. A &lt;code&gt;Trait&lt;/code&gt; represents a value of
+any type that implements &lt;code&gt;Trait&lt;/code&gt; and these have varying sizes.&lt;/p&gt;
+&lt;p&gt;Unsized values must always be behind a pointer: &lt;code&gt;&amp;amp;[T]&lt;/code&gt; or &lt;code&gt;Box&amp;lt;Trait&amp;gt;&lt;/code&gt;. The pointer has the info
+required to compute the size.&lt;/p&gt;
+&lt;p&gt;Sized types have more flexibility - compiler can manipulate them directly. Having an unsized type
+behind a pointer effectively makes it sized - size of the pointer.&lt;/p&gt;
+&lt;p&gt;Since &lt;code&gt;Sized&lt;/code&gt; is bound for type parameters by default, a special syntax &lt;code&gt;?Sized&lt;/code&gt; is used to
+opt-out.&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;p&gt;This unusual decision was chosen because of the increased flexibility of sized types, and some
+data (which I now can’t find in the issue tracker) which indicated that most type parameters
+needed to be sized.&lt;/p&gt;
+&lt;/blockquote&gt;
+</content>
+
+        <author>
+            <name>Matt</name>
+        </author>
+    </entry>
+    
+    <entry>
+        <title>simple event hooks in Rust</title>
+        <link rel="alternate" href="https://mattgathu.github.io/2017/11/03/simple-events-hook-rust.html" type="text/html" title="simple event hooks in Rust" />
+        <published>2017-11-03T00:00:00+00:00</published>
+        <updated>2017-11-03T00:00:00+00:00</updated>
+        <id>https://mattgathu.github.io/2017/11/03/simple-events-hook-rust.html</id>
+        <content type="html" xml:base="https://mattgathu.github.io/2017/11/03/simple-events-hook-rust.html">&lt;h2&gt;&lt;a href=&quot;#what&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;what&quot;&gt;&lt;/a&gt;What&lt;/h2&gt;
+&lt;p&gt;The &lt;strong&gt;observer pattern&lt;/strong&gt; is a software design pattern in which an object, called the subject, maintains
+a list of its dependents, called observers, and notifies them automatically of any state changes,
+usually by calling one of their methods. &lt;a href=&quot;https://en.wikipedia.org/wiki/Observer_pattern&quot;&gt;1&lt;/a&gt;&lt;/p&gt;
+&lt;p&gt;&lt;strong&gt;Event hooks&lt;/strong&gt; (or callbacks) are a simple way of implementing the observer pattern where a the
+subject notifies the observers when certain events occurs.&lt;/p&gt;
+&lt;h2&gt;&lt;a href=&quot;#why&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;why&quot;&gt;&lt;/a&gt;Why&lt;/h2&gt;
+&lt;p&gt;Event hooks can be used to implement event-driven programming, where the flow of the program is
+determined by events such as user actions, sensor outputs, or  messages from other programs/threads.&lt;a href=&quot;https://en.wikipedia.org/wiki/Event-driven_programming&quot;&gt;2&lt;/a&gt;&lt;/p&gt;
+&lt;h2&gt;&lt;a href=&quot;#how&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;how&quot;&gt;&lt;/a&gt;How&lt;/h2&gt;
+&lt;p&gt;We use Rust's &lt;a href=&quot;https://doc.rust-lang.org/book/second-edition/ch10-02-traits.html&quot;&gt;traits&lt;/a&gt; feature to define the expected behaviour of our events interface. The
+trait will contain the event hooks that the event handlers are supposed to implement.&lt;/p&gt;
+&lt;p&gt;The use of trait makes our event handlers to be generic (they can be of any type), all that will be
+required of them is to have an implementation of the trait.&lt;/p&gt;
+&lt;p&gt;For illustration, I'll implement an event-driven Logger that records tcp connection events.&lt;/p&gt;
+&lt;p&gt;Below is a trait that implements an events interface for a tcp socket communication&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;#[allow(unused_variables)]
+pub trait Events {
+    fn on_connect(&amp;amp;self, host: &amp;amp;str, port: i32) {}
+    fn on_error(&amp;amp;self, err: &amp;amp;str) {}
+    fn on_read(&amp;amp;self, resp: &amp;amp;[u8]) {}
+    fn on_shutdown(&amp;amp;self) {}
+    fn on_pre_read(&amp;amp;self) {}
+    fn on_post_read(&amp;amp;self) {}
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;Then, a simple &lt;strong&gt;Logger&lt;/strong&gt; struct implements the trait as follows&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;struct Logger;
+
+impl Events for Logger {
+    fn on_connect(&amp;amp;self, host: &amp;amp;str, port: i32) {
+        println!(&amp;quot;Connected to {} on port {}&amp;quot;, host, port);
+    }
+
+    fn on_error(&amp;amp;self, err: &amp;amp;str) {
+        println!(&amp;quot;error: {}&amp;quot;, err);
+    }
+
+    fn on_read(&amp;amp;self, resp: &amp;amp;[u8]) {
+        print!(&amp;quot;{}&amp;quot;, str::from_utf8(resp).unwrap());
+    }
+
+    fn on_shutdown(&amp;amp;self) {
+        println!(&amp;quot;Connection closed.&amp;quot;);
+    }
+
+    fn on_pre_read(&amp;amp;self) {
+        println!(&amp;quot;Receiving content:\n&amp;quot;);
+    }
+
+    fn on_post_read(&amp;amp;self) {
+        println!(&amp;quot;\nFinished receiving content.&amp;quot;)
+    }
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The &lt;strong&gt;Logger&lt;/strong&gt; acts as the Observer that gets notified when events occur.&lt;/p&gt;
+&lt;p&gt;Next, we have a &lt;strong&gt;HttpClient&lt;/strong&gt; struct that does some tcp network calls and notifies its registered hooks
+(observers) when the events occurs.&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;struct HttpClient {
+    host: String,
+    port: i32,
+    hooks: Vec&amp;lt;Box&amp;lt;Events&amp;gt;&amp;gt;,
+}
+
+impl HttpClient {
+    pub fn new(host: &amp;amp;str, port: i32) -&amp;gt; Self {
+        Self {
+            host: host.to_owned(),
+            port: port,
+            hooks: Vec::new(),
+        }
+    }
+
+    pub fn add_events_hook&amp;lt;E: Events + 'static&amp;gt;(&amp;amp;mut self, hook: E) {
+        self.hooks.push(Box::new(hook));
+    }
+
+    pub fn get(&amp;amp;self, endpoint: &amp;amp;str) {
+        let cmd = format!(&amp;quot;GET {} HTTP/1.1\r\nHost: {}\r\n\r\n&amp;quot;, endpoint, self.host).into_bytes();
+        let mut socket = self.connect().unwrap();
+        socket.write(cmd.as_slice()).unwrap();
+        socket.flush().unwrap();
+        for hook in &amp;amp;self.hooks {
+            hook.on_pre_read();
+        }
+        loop {
+            let mut buf = vec![0; 512usize];
+            let cnt = socket.read(&amp;amp;mut buf[..]).unwrap();
+            buf.truncate(cnt);
+            if !buf.is_empty() {
+                for hook in &amp;amp;self.hooks {
+                    hook.on_read(buf.as_slice());
+                }
+            } else {
+                for hook in &amp;amp;self.hooks {
+                    hook.on_post_read();
+                }
+                break;
+            }
+        }
+        for hook in &amp;amp;self.hooks {
+            hook.on_shutdown();
+        }
+
+    }
+
+    pub fn connect(&amp;amp;self) -&amp;gt; io::Result&amp;lt;TcpStream&amp;gt;{
+        let addr = format!(&amp;quot;{}:{}&amp;quot;, self.host, self.port);
+        match TcpStream::connect(addr) {
+            Ok(stream) =&amp;gt; {
+                for hook in &amp;amp;self.hooks {
+                    hook.on_connect(&amp;amp;self.host, self.port);
+                }
+                Ok(stream)
+            },
+            Err(error) =&amp;gt; {
+                for hook in &amp;amp;self.hooks {
+                    hook.on_error(error.description());
+                }
+                Err(error)
+            },
+        }
+
+    }
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The &lt;strong&gt;HttpClient&lt;/strong&gt; struct implements a &lt;strong&gt;add_events_hook&lt;/strong&gt; method that is used to register the events handlers.&lt;/p&gt;
+&lt;p&gt;To piece all together, we have a &lt;strong&gt;main&lt;/strong&gt; function that:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;initializes the &lt;strong&gt;HttpClient&lt;/strong&gt; struct.&lt;/li&gt;
+&lt;li&gt;registers the &lt;strong&gt;Logger&lt;/strong&gt; has an event hooks handler for &lt;strong&gt;HttpClient&lt;/strong&gt;&lt;/li&gt;
+&lt;li&gt;makes a network call using &lt;strong&gt;HttpClient&lt;/strong&gt;. This results in the &lt;strong&gt;Logger&lt;/strong&gt; receiving events.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;fn main() {
+    let mut  http_stream = HttpClient::new(&amp;quot;httpbin.org&amp;quot;, 80);
+    http_stream.add_events_hook(Logger);
+    http_stream.get(&amp;quot;/ip&amp;quot;);
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The &lt;strong&gt;Logger&lt;/strong&gt; will log the events to the terminal:&lt;/p&gt;
+&lt;pre&gt;&lt;code&gt;Connected to httpbin.org on port 80
+Receiving content:
+
+HTTP/1.1 200 OK
+Connection: keep-alive
+Server: meinheld/0.6.1
+Date: Fri, 03 Nov 2017 09:16:40 GMT
+Content-Type: application/json
+Access-Control-Allow-Origin: *
+Access-Control-Allow-Credentials: true
+X-Powered-By: Flask
+X-Processed-Time: 0.000749111175537
+Content-Length: 33
+Via: 1.1 vegur
+
+{
+  &amp;quot;origin&amp;quot;: &amp;quot;212.22.171.150&amp;quot;
+}
+
+Finished receiving content.
+Connection closed.
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;Voila! That's a simple implementation of event hooks in Rust. The complete code can be found
+&lt;a href=&quot;https://gist.github.com/mattgathu/73712cb7399834d6f8162d641830cbb7&quot;&gt;here&lt;/a&gt;&lt;/p&gt;
+&lt;h2&gt;&lt;a href=&quot;#footnotes&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;footnotes&quot;&gt;&lt;/a&gt;Footnotes&lt;/h2&gt;
+&lt;p&gt;There is a lot of event driven work being done using Rust and here are some interesting projects
+that you can check out:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a href=&quot;https://github.com/carllerche/mio&quot;&gt;mio&lt;/a&gt; -  a lightweight I/O library for Rust.&lt;/li&gt;
+&lt;li&gt;&lt;a href=&quot;https://github.com/housleyjk/ws-rs&quot;&gt;ws-rs&lt;/a&gt; - Lightweight, event-driven WebSockets for Rust.&lt;/li&gt;
+&lt;li&gt;&lt;a href=&quot;https://github.com/tokio-rs/tokio-core&quot;&gt;tokio-core&lt;/a&gt; - I/O primitives and event loop for async I/O in Rust&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;&lt;a href=&quot;#references&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;references&quot;&gt;&lt;/a&gt;References&lt;/h2&gt;
+&lt;ol&gt;
+&lt;li&gt;&lt;a href=&quot;https://en.wikipedia.org/wiki/Observer_pattern&quot;&gt;https://en.wikipedia.org/wiki/Observer_pattern&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&quot;https://en.wikipedia.org/wiki/Event-driven_programming&quot;&gt;https://en.wikipedia.org/wiki/Event-driven_programming&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&quot;https://doc.rust-lang.org/book/second-edition/ch10-02-traits.html&quot;&gt;https://doc.rust-lang.org/book/second-edition/ch10-02-traits.html&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&quot;https://doc.rust-lang.org/book/second-edition/ch19-03-advanced-traits.html&quot;&gt;https://doc.rust-lang.org/book/second-edition/ch19-03-advanced-traits.html&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&quot;https://doc.rust-lang.org/std/net/struct.TcpStream.html&quot;&gt;https://doc.rust-lang.org/std/net/struct.TcpStream.html&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&quot;https://github.com/seanmonstar/reqwest/issues/155&quot;&gt;https://github.com/seanmonstar/reqwest/issues/155&lt;/a&gt;&lt;/li&gt;
+&lt;/ol&gt;
+</content>
+
+        <author>
+            <name>Matt</name>
+        </author>
+    </entry>
+    
+    <entry>
+        <title>Testing a Rust Command Line Tool</title>
+        <link rel="alternate" href="https://mattgathu.github.io/2017/10/01/testing-rust-cli-apps.html" type="text/html" title="Testing a Rust Command Line Tool" />
+        <published>2017-10-01T00:00:00+00:00</published>
+        <updated>2017-10-01T00:00:00+00:00</updated>
+        <id>https://mattgathu.github.io/2017/10/01/testing-rust-cli-apps.html</id>
+        <content type="html" xml:base="https://mattgathu.github.io/2017/10/01/testing-rust-cli-apps.html">&lt;p&gt;&lt;img src=&quot;/images/cargo_test.png&quot; alt=&quot;cargo-tests-results&quot; /&gt;&lt;/p&gt;
+&lt;p&gt;Recently I wrote a post on &lt;a href=&quot;http://mattgathu.github.io/writing-cli-app-rust/&quot;&gt;how to write a CLI application using Rust&lt;/a&gt;. This is a follow up post
+exploring how to test CLI applications and integrating tests with Cargo, Rust's build tool.&lt;/p&gt;
+&lt;h2&gt;&lt;a href=&quot;#what&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;what&quot;&gt;&lt;/a&gt;What&lt;/h2&gt;
+&lt;p&gt;Cargo has builtin support for running both unit and integration tests. It also generates
+a tests module template when writing a library. This template makes it quick to get
+up and running with writing unit tests in Rust.&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;#[cfg(test)]
+mod tests {
+    #[test]
+    fn it_works() {
+    }
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The &lt;code&gt;#[cfg(test)]&lt;/code&gt; annotation on the tests module tells Rust to compile and run the test code only
+when we run &lt;code&gt;cargo test&lt;/code&gt;, and not when we run &lt;code&gt;cargo build&lt;/code&gt;. This saves compile time when we only want
+to build the library, and saves space in the resulting compiled artifact since the tests are not included.&lt;/p&gt;
+&lt;p&gt;Unit tests (&lt;em&gt;tests that test each unit of code in isolation from the rest of the code&lt;/em&gt;) require
+little effort to write and reason about since they are very specific. A quick example for a unit
+test would to be to test if a function returns the correct value.&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;// recursive
+fn recursive_factorial(n: i64) -&amp;gt; i64 {
+    match n {
+        0 =&amp;gt; 1,
+        _ =&amp;gt; n * recursive_factorial(n-1),
+    }
+}
+
+// iterative
+fn iterative_factorial(n: i64) -&amp;gt; i64 {
+    (1..n+1).fold(1, |acc, x| acc * x)
+}
+
+fn main() {
+    println!(&amp;quot;10!: {}&amp;quot;, recursive_factorial(10));
+    println!(&amp;quot;14!: {}&amp;quot;, iterative_factorial(14));
+}
+
+
+#[test]
+fn test_recursive_factorial() {
+    assert_eq!(recursive_factorial(4), 24);
+}
+
+#[test]
+fn test_iterative_factorial() {
+    assert_eq!(iterative_factorial(4), 24);
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;Integration tests on the other hand are meant to test that many parts of your application work
+correctly together, and for this reason they require more effort writing. Units of code that work correctly by themselves could have issues when
+integrated, this makes integration tests important. More on this later.&lt;/p&gt;
+&lt;h2&gt;&lt;a href=&quot;#why&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;why&quot;&gt;&lt;/a&gt;Why&lt;/h2&gt;
+&lt;blockquote&gt;
+&lt;p&gt;“If we want to be serious about quality, it is time to get tired of finding bugs and start preventing their happening in the first place.”— Alan Page&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;Some reasons for writing tests would be:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;Improved Quality of Software&lt;/li&gt;
+&lt;li&gt;Finding bugs and defects.&lt;/li&gt;
+&lt;li&gt;Ensuring a consistent User Experience, by preventing regression.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;&lt;a href=&quot;#how&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;how&quot;&gt;&lt;/a&gt;How&lt;/h2&gt;
+&lt;p&gt;As I mentioned earlier, Unit tests are quite easy to writing as compare to integration tests. I
+will therefore outline how to write Integration tests for Rust CLI applications and give two
+approaches.&lt;/p&gt;
+&lt;p&gt;CLI applications are normally invoked as commands on terminal application such as iTerm or cmd.exe.
+Testing CLI app functionality then requires a terminal environment emulation. In Rust we can
+achieve this by calling our executable via the &lt;a href=&quot;https://doc.rust-lang.org/std/process/struct.Command.html&quot;&gt;std::process::Command&lt;/a&gt;
+interface.&lt;/p&gt;
+&lt;p&gt;This allows us to gain access to our executable's:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;environment variable mapping&lt;/li&gt;
+&lt;li&gt;stdin&lt;/li&gt;
+&lt;li&gt;stdout&lt;/li&gt;
+&lt;li&gt;stderr&lt;/li&gt;
+&lt;li&gt;exit status&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;We can then use these to assert that our application behaves as expected when executed.&lt;/p&gt;
+&lt;p&gt;We normally write our integration tests in a top level &lt;code&gt;tests&lt;/code&gt; directory, next to the &lt;code&gt;src&lt;/code&gt;
+directory. Cargo knows to look for integration test files in this directory.&lt;/p&gt;
+&lt;p&gt;Below is an example test of an integration tests (&lt;em&gt;for my &lt;a href=&quot;https://github.com/mattgathu/rget&quot;&gt;rget&lt;/a&gt; project&lt;/em&gt;)
+using the &lt;a href=&quot;https://doc.rust-lang.org/std/process/struct.Command.html&quot;&gt;std::process::Command&lt;/a&gt; interface:&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;// filename: tests/integration.rs
+
+use std::process::Command;
+
+static WITHOUT_ARGS_OUTPUT: &amp;amp;'static str = &amp;quot;error: The following required arguments were not provided:
+    &amp;lt;URL&amp;gt;
+USAGE:
+    rget [FLAGS] [OPTIONS] &amp;lt;URL&amp;gt;
+For more information try --help
+&amp;quot;;
+
+static INVALID_URL_OUTPUT: &amp;amp;'static str = &amp;quot;Got error: failed to lookup address information:&amp;quot;;
+ 
+mod integration {
+    use Command;
+    use WITHOUT_ARGS_OUTPUT;
+    use INVALID_URL_OUTPUT;
+
+    #[test]
+    fn calling_rget_without_args() {
+        let output = Command::new(&amp;quot;./target/debug/rget&amp;quot;)
+            .output()
+            .expect(&amp;quot;failed to execute process&amp;quot;);
+    
+        assert_eq!(String::from_utf8_lossy(&amp;amp;output.stderr), WITHOUT_ARGS_OUTPUT);
+    }
+    
+    #[test]
+    fn calling_rget_with_invalid_url() {
+        let output = Command::new(&amp;quot;./target/debug/rget&amp;quot;)
+            .arg(&amp;quot;wwww.shouldnotwork.com&amp;quot;)
+            .output()
+            .expect(&amp;quot;failed to execute process&amp;quot;);
+    
+        assert!(String::from_utf8_lossy(&amp;amp;output.stderr).contains(INVALID_URL_OUTPUT));
+    }
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The &lt;a href=&quot;https://doc.rust-lang.org/std/process/struct.Command.html&quot;&gt;std::process::Command&lt;/a&gt;
+is quite effective at writing our integration tests but becomes quite
+repetitive when writing many tests and/or writing tests for different OS platforms since the
+executables differ based on the platform.&lt;/p&gt;
+&lt;p&gt;Here, the &lt;a href=&quot;https://github.com/killercup/assert_cli&quot;&gt;assert_cli&lt;/a&gt; crate comes
+to our rescue. &lt;strong&gt;assert_cli&lt;/strong&gt; allows us to write out integration tests without worrying about the
+&lt;a href=&quot;https://doc.rust-lang.org/std/process/struct.Command.html&quot;&gt;std::process::Command&lt;/a&gt; interface by
+abstracting it away for us.&lt;/p&gt;
+&lt;p&gt;It also provides an intuitive test-oriented interface that makes it easy to reason and write
+integration tests.&lt;/p&gt;
+&lt;p&gt;When we re-write our example integration tests using &lt;strong&gt;assert_cli&lt;/strong&gt;, they become:&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;// filename: tests/integration.rs
+
+extern crate assert_cli;
+
+static INVALID_URL_OUTPUT: &amp;amp;'static str = &amp;quot;Got error: failed to lookup address information:&amp;quot;;
+
+mod integration {
+    use assert_cli;
+    use INVALID_URL_OUTPUT;
+
+    #[test]
+    fn calling_rget_without_args() {
+        assert_cli::Assert::main_binary()
+            .fails()
+            .and()
+            .prints_error(&amp;quot;error: The following required arguments were not provided:&amp;quot;)
+            .unwrap();
+
+    }
+
+    #[test]
+    fn calling_rget_with_invalid_url() {
+        assert_cli::Assert::main_binary()
+            .with_args(&amp;amp;[&amp;quot;wwww.shouldnotwork.com&amp;quot;])
+            .fails()
+            .and()
+            .prints_error(INVALID_URL_OUTPUT)
+            .unwrap();
+    }
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;Voila, &lt;strong&gt;assert_cli&lt;/strong&gt; becomes useful in writing integration tests for CLI applications.
+The crate's goal is to provide you some very easy tools to test your CLI applications. It can
+execute child processes and validate their exit status as well as stdout and stderr output
+against your assertions. For more examples and usages, check out its &lt;a href=&quot;https://docs.rs/assert_cli/0.5.2/assert_cli/&quot;&gt;documentation&lt;/a&gt;&lt;/p&gt;
+&lt;h2&gt;&lt;a href=&quot;#recap&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;recap&quot;&gt;&lt;/a&gt;Recap&lt;/h2&gt;
+&lt;p&gt;Testing is an important component of Software development. Rust provides support for writing both
+unit tests and integration tests and Cargo automatically runs tests for us.&lt;/p&gt;
+&lt;p&gt;Integration tests are more complex to write compared to unit tests, moreso for CLI applications
+that require the emulation of a terminal environment.&lt;/p&gt;
+&lt;p&gt;Rust provides &lt;a href=&quot;https://doc.rust-lang.org/std/process/struct.Command.html&quot;&gt;std::process::Command&lt;/a&gt; that makes it simple to call an executable and be able to monitor
+it's environment, input, output and status.&lt;/p&gt;
+&lt;p&gt;The &lt;a href=&quot;https://github.com/killercup/assert_cli&quot;&gt;assert_cli&lt;/a&gt; crate makes it easy to write integration tests by abstracting rust internals and
+providing a testing oriented interface that makes it easy to read and reason about our tests.&lt;/p&gt;
+</content>
+
+        <author>
+            <name>Matt</name>
+        </author>
+    </entry>
+    
+    <entry>
+        <title>Writing a Command Line Tool in Rust</title>
+        <link rel="alternate" href="https://mattgathu.github.io/2017/08/29/writing-cli-app-rust.html" type="text/html" title="Writing a Command Line Tool in Rust" />
+        <published>2017-08-29T00:00:00+00:00</published>
+        <updated>2017-08-29T00:00:00+00:00</updated>
+        <id>https://mattgathu.github.io/2017/08/29/writing-cli-app-rust.html</id>
+        <content type="html" xml:base="https://mattgathu.github.io/2017/08/29/writing-cli-app-rust.html">&lt;p&gt;&lt;img src=&quot;/images/cli.png&quot; alt=&quot;cli-help-menu&quot; /&gt;&lt;/p&gt;
+&lt;h2&gt;&lt;a href=&quot;#what&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;what&quot;&gt;&lt;/a&gt;What&lt;/h2&gt;
+&lt;p&gt;&lt;a href=&quot;https://www.rust-lang.org/en-US/&quot;&gt;Rust&lt;/a&gt; is a systems programming language that enables you to
+write fast, safe and concurrent code. It fits in the same niche as C and C++ but provides a fresh
+breath of features and convenience that makes writing programs in it fun.&lt;/p&gt;
+&lt;p&gt;&lt;a href=&quot;https://en.wikipedia.org/wiki/Command-line_interface&quot;&gt;Command Line Tools&lt;/a&gt; are programs designed to
+be executed in a terminal (command line) interface. They are synonymous with Unix programming where
+they are often called shell tools. An example is the &lt;code&gt;ls&lt;/code&gt; command used to list directories.&lt;/p&gt;
+&lt;p&gt;We are going to cover how to write a command line tool using Rust by writing a simple clone of the
+popular &lt;code&gt;wget&lt;/code&gt; tool used for file downloads.&lt;/p&gt;
+&lt;h2&gt;&lt;a href=&quot;#why&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;why&quot;&gt;&lt;/a&gt;Why&lt;/h2&gt;
+&lt;p&gt;The aim here is to get started writing command line tools in Rust programming language also use some wonderful
+crates (community libraries) that make writing CLI programs a breeze.&lt;/p&gt;
+&lt;h2&gt;&lt;a href=&quot;#how&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;how&quot;&gt;&lt;/a&gt;How&lt;/h2&gt;
+&lt;p&gt;Our simple &lt;code&gt;wget&lt;/code&gt; clone will have the following features which a desirable in a command line tool:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Argument parsing&lt;/strong&gt;&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Colored Output&lt;/strong&gt;&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Progress bar&lt;/strong&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;&lt;a href=&quot;#project-setup&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;project-setup&quot;&gt;&lt;/a&gt;Project Setup&lt;/h3&gt;
+&lt;p&gt;We use rust's build tool (and package manager)
+&lt;a href=&quot;https://doc.rust-lang.org/book/second-edition/ch01-02-hello-world.html#hello-cargo&quot;&gt;Cargo&lt;/a&gt; to setup our project skeleton.&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-bash&quot;&gt;cargo new rget --bin
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;This creates a new project called &lt;code&gt;rget&lt;/code&gt; and the &lt;code&gt;--bin&lt;/code&gt; option tells cargo we are building an
+executable and not a library. A folder is generated with the following structure.&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-bash&quot;&gt;$ cd rget
+$ tree .
+.
+├── Cargo.toml
+└── src
+    └── main.rs
+
+1 directory, 2 files
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;&lt;code&gt;Cargo.toml&lt;/code&gt; is a manifest file and our code will live under the &lt;code&gt;src&lt;/code&gt; directory, in &lt;code&gt;main.rs&lt;/code&gt;&lt;/p&gt;
+&lt;h3&gt;&lt;a href=&quot;#argument-parsing&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;argument-parsing&quot;&gt;&lt;/a&gt;Argument Parsing&lt;/h3&gt;
+&lt;p&gt;We will use the &lt;a href=&quot;https://crates.io/crates/clap&quot;&gt;clap&lt;/a&gt; crate for parsing command line arguments. We
+add to our project by updating cargo's manifest file dependecies section.&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-toml&quot;&gt;[package]
+name = &amp;quot;rget&amp;quot;
+version = &amp;quot;0.1.0&amp;quot;
+authors = [&amp;quot;Matt Gathu &amp;lt;mattgathu@gmail.com&amp;gt;&amp;quot;]
+
+[dependencies]
+clap = &amp;quot;2.26.0&amp;quot;
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;We then update our &lt;strong&gt;main&lt;/strong&gt; function in &lt;code&gt;main.rs&lt;/code&gt; to perform argument parsing.&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;extern crate clap;
+
+use clap::{Arg, App};
+
+fn main() {
+    let matches = App::new(&amp;quot;Rget&amp;quot;)
+        .version(&amp;quot;0.1.0&amp;quot;)
+        .author(&amp;quot;Matt Gathu &amp;lt;mattgathu@gmail.com&amp;gt;&amp;quot;)
+        .about(&amp;quot;wget clone written in Rust&amp;quot;)
+        .arg(Arg::with_name(&amp;quot;URL&amp;quot;)
+                 .required(true)
+                 .takes_value(true)
+                 .index(1)
+                 .help(&amp;quot;url to download&amp;quot;))
+        .get_matches();
+    let url = matches.value_of(&amp;quot;URL&amp;quot;).unwrap();
+    println!(&amp;quot;{}&amp;quot;, url);
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;We can now test our argument parser using Cargo.&lt;/p&gt;
+&lt;p&gt;&lt;code&gt;cargo run&lt;/code&gt;&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-bash&quot;&gt;    Finished dev [unoptimized + debuginfo] target(s) in 0.0 secs
+     Running `target/debug/rget`
+error: The following required arguments were not provided:
+    &amp;lt;URL&amp;gt;
+
+USAGE:
+    rget &amp;lt;URL&amp;gt;
+
+For more information try --help
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;We can pass arguments to our program by adding &lt;code&gt;--&lt;/code&gt; when calling &lt;code&gt;cargo run&lt;/code&gt;&lt;/p&gt;
+&lt;p&gt;&lt;code&gt;cargo run -- -h&lt;/code&gt;&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-bash&quot;&gt;    Finished dev [unoptimized + debuginfo] target(s) in 0.0 secs
+     Running `target/debug/rget -h`
+Rget 0.1.0
+Matt Gathu &amp;lt;mattgathu@gmail.com&amp;gt;
+wget clone written in Rust
+
+USAGE:
+    rget &amp;lt;URL&amp;gt;
+
+FLAGS:
+    -h, --help       Prints help information
+    -V, --version    Prints version information
+
+ARGS:
+    &amp;lt;URL&amp;gt;    url to download
+&lt;/code&gt;&lt;/pre&gt;
+&lt;h3&gt;&lt;a href=&quot;#progress-bar-and-colored-output&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;progress-bar-and-colored-output&quot;&gt;&lt;/a&gt;Progress bar and colored output&lt;/h3&gt;
+&lt;p&gt;&lt;a href=&quot;https://crates.io/crates/indicatif&quot;&gt;indicatif&lt;/a&gt; is a rust library for indicating
+progress in command line applications. We use it to implement a progress bar and a spinner for our wget clone.&lt;/p&gt;
+&lt;p&gt;indicatif relies on another crate, &lt;a href=&quot;https://crates.io/crates/console&quot;&gt;console&lt;/a&gt; and uses it for colored output.
+we'll always leverage console and use it to print out colored text.&lt;/p&gt;
+&lt;p&gt;Below is the function for creating the progress bar:&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;fn create_progress_bar(quiet_mode: bool, msg: &amp;amp;str, length: Option&amp;lt;u64&amp;gt;) -&amp;gt; ProgressBar {
+    let bar = match quiet_mode {
+        true =&amp;gt; ProgressBar::hidden(),
+        false =&amp;gt; {
+            match length {
+                Some(len) =&amp;gt; ProgressBar::new(len),
+                None =&amp;gt; ProgressBar::new_spinner(),
+            }
+        }
+    };
+
+    bar.set_message(msg);
+    match length.is_some() {
+        true =&amp;gt; bar
+            .set_style(ProgressStyle::default_bar()
+                .template(&amp;quot;{msg} {spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} eta: {eta}&amp;quot;)
+                .progress_chars(&amp;quot;=&amp;gt; &amp;quot;)),
+        false =&amp;gt; bar.set_style(ProgressStyle::default_spinner()),
+    };
+
+    bar
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The function has several arguments and creates a progress bar based on their value. We use Rust's
+&lt;a href=&quot;https://doc.rust-lang.org/book/second-edition/ch06-02-match.html&quot;&gt;pattern matching&lt;/a&gt; feature to
+match the arguments to the desired progress bar.&lt;/p&gt;
+&lt;h3&gt;&lt;a href=&quot;#cloning-wgets-logic&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;cloning-wgets-logic&quot;&gt;&lt;/a&gt;Cloning wget's logic&lt;/h3&gt;
+&lt;p&gt;We use the &lt;a href=&quot;https://crates.io/crates/reqwest&quot;&gt;reqwest&lt;/a&gt; crate for implement file download function
+that receives a url and downloads it into a local file.&lt;/p&gt;
+&lt;p&gt;The download function will also update the progress bar when each chunk of the file is downloaded
+and also print out colored text with the download's metadata. This behaviour will be similar to
+wget's.&lt;/p&gt;
+&lt;p&gt;Here's a code snippet showing the download function:&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-rust&quot;&gt;fn download(target: &amp;amp;str, quiet_mode: bool) -&amp;gt; Result&amp;lt;(), Box&amp;lt;::std::error::Error&amp;gt;&amp;gt; {
+
+    // parse url
+    let url = parse_url(target)?;
+    let client = Client::new().unwrap();
+    let mut resp = client.get(url)?
+        .send()
+        .unwrap();
+    print(format!(&amp;quot;HTTP request sent... {}&amp;quot;,
+                  style(format!(&amp;quot;{}&amp;quot;, resp.status())).green()),
+          quiet_mode);
+    if resp.status().is_success() {
+
+        let headers = resp.headers().clone();
+        let ct_len = headers.get::&amp;lt;ContentLength&amp;gt;().map(|ct_len| **ct_len);
+
+        let ct_type = headers.get::&amp;lt;ContentType&amp;gt;().unwrap();
+
+        match ct_len {
+            Some(len) =&amp;gt; {
+                print(format!(&amp;quot;Length: {} ({})&amp;quot;,
+                      style(len).green(),
+                      style(format!(&amp;quot;{}&amp;quot;, HumanBytes(len))).red()),
+                    quiet_mode);
+            },
+            None =&amp;gt; {
+                print(format!(&amp;quot;Length: {}&amp;quot;, style(&amp;quot;unknown&amp;quot;).red()), quiet_mode); 
+            },
+        }
+
+        print(format!(&amp;quot;Type: {}&amp;quot;, style(ct_type).green()), quiet_mode);
+
+        let fname = target.split(&amp;quot;/&amp;quot;).last().unwrap();
+
+        print(format!(&amp;quot;Saving to: {}&amp;quot;, style(fname).green()), quiet_mode);
+
+        let chunk_size = match ct_len {
+            Some(x) =&amp;gt; x as usize / 99,
+            None =&amp;gt; 1024usize, // default chunk size
+        };
+
+        let mut buf = Vec::new();
+
+        let bar = create_progress_bar(quiet_mode, fname, ct_len);
+
+        loop {
+            let mut buffer = vec![0; chunk_size];
+            let bcount = resp.read(&amp;amp;mut buffer[..]).unwrap();
+            buffer.truncate(bcount);
+            if !buffer.is_empty() {
+                buf.extend(buffer.into_boxed_slice()
+                               .into_vec()
+                               .iter()
+                               .cloned());
+                bar.inc(bcount as u64);
+            } else {
+                break;
+            }
+        }
+
+        bar.finish();
+
+        save_to_file(&amp;amp;mut buf, fname)?;
+    }
+
+    Ok(())
+
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The &lt;code&gt;download&lt;/code&gt; function takes a target url, parses it to generate a filename and uses the
+&lt;code&gt;Content-Length&lt;/code&gt; HTTP header to determine the size of the file. It generates a colored progress bar and
+downloads the file in chunks. Once each chunk is received, the progress bar is updated to show
+progress.&lt;/p&gt;
+&lt;p&gt;Once the full download is complete, the file contents are save to a file.&lt;/p&gt;
+&lt;h2&gt;&lt;a href=&quot;#recap&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;recap&quot;&gt;&lt;/a&gt;Recap&lt;/h2&gt;
+&lt;p&gt;Writing CLI tools in Rust is quite easy. Argument parsing can be done using the &lt;code&gt;clap&lt;/code&gt; crate,
+progress bars generated using the &lt;code&gt;indicatif&lt;/code&gt; crate and colored output using the &lt;code&gt;console&lt;/code&gt; crate.
+The &lt;code&gt;cargo&lt;/code&gt; build tool also makes it a breeze to build and run our code.&lt;/p&gt;
+&lt;p&gt;You can find the full implementation of the &lt;code&gt;wget&lt;/code&gt; clone my &lt;a href=&quot;https://github.com/mattgathu/rget&quot;&gt;github&lt;/a&gt;.&lt;/p&gt;
+</content>
+
+        <author>
+            <name>Matt</name>
+        </author>
+    </entry>
+    
+    <entry>
+        <title>Why Functional Programming Matters (paper review)</title>
+        <link rel="alternate" href="https://mattgathu.github.io/2017/08/06/why-functional-programming.html" type="text/html" title="Why Functional Programming Matters (paper review)" />
+        <published>2017-08-06T00:00:00+00:00</published>
+        <updated>2017-08-06T00:00:00+00:00</updated>
+        <id>https://mattgathu.github.io/2017/08/06/why-functional-programming.html</id>
+        <content type="html" xml:base="https://mattgathu.github.io/2017/08/06/why-functional-programming.html">&lt;p&gt;&lt;img src=&quot;https://imgs.xkcd.com/comics/functional.png&quot; alt=&quot;functional-love&quot; /&gt;&lt;/p&gt;
+&lt;h2&gt;&lt;a href=&quot;#what&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;what&quot;&gt;&lt;/a&gt;What&lt;/h2&gt;
+&lt;blockquote&gt;
+&lt;p&gt;In this paper we show that two features of
+functional languages in particular, higher-order functions and lazy evaluation,
+can contribute greatly to modularity. ~ John Hughes&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;Modular Programming is a key technique in successful software design and all major programming
+languages have a notion of component based engineering.
+Functional programming has contributed a lot in enhancing modular software design by providing
+features such as high order functions and lazy evaluation that have pushed back on the conceptual
+limits of conventional languages on the ways problems can be modularised.&lt;/p&gt;
+&lt;p&gt;&lt;a href=&quot;https://github.com/papers-we-love/papers-we-love/blob/master/paradigms/functional_programming/why-functional-programming-matters.pdf&quot;&gt;&amp;quot;Why Functional Programming Matters&amp;quot;&lt;/a&gt;
+is a late 80s paper by John Hughes that portrays the
+importance of functional programming moreso where modularisation is key:&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;p&gt;This paper is an attempt to demonstrate to the “real world” that functional
+programming is vitally important, and also to help functional programmers
+exploit its advantages to the full by making it clear what those advantages are.&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;h2&gt;&lt;a href=&quot;#why&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;why&quot;&gt;&lt;/a&gt;Why&lt;/h2&gt;
+&lt;p&gt;&lt;img src=&quot;https://imgs.xkcd.com/comics/haskell.png&quot; alt=&quot;haskell&quot; /&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;p&gt;Such a catalogue of “advantages” is all very well, but one must not be surprised
+if outsiders don’t take it too seriously. It says a lot about what functional
+programming is not (it has no assignment, no side effects, no flow of control) but
+not much about what it is.&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;Perhaps the biggest motivation for this paper could have been to provide an adequate characterisation of
+functional programming and argue that it supports the development of reusable software
+way better than conventional programming paradigms.&lt;/p&gt;
+&lt;p&gt;Hughes gives a great analogy of functional programming with structured programming, and shows how FP
+strives beyond structured programming by enabling greater modularity and supporting &lt;em&gt;&amp;quot;programming in
+the large&amp;quot;&lt;/em&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;p&gt;It is helpful to draw an analogy between functional and structured programming.
+In the past, the characteristics and advantages of structured programming have
+been summed up more or less as follows. Structured programs contain no goto
+statements. Blocks in a structured program do not have multiple entries or exits.
+Structured programs are more tractable mathematically than their unstructured
+counterparts. These “advantages” of structured programming are very similar in
+spirit to the “advantages” of functional programming we discussed earlier.&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;h2&gt;&lt;a href=&quot;#whom-when-where&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;whom-when-where&quot;&gt;&lt;/a&gt;Whom, when, where&lt;/h2&gt;
+&lt;p&gt;Why functional programming matters, was published in 1989 in the &lt;em&gt;Computer Journal&lt;/em&gt; by &lt;a href=&quot;http://www.cse.chalmers.se/~rjmh/&quot;&gt;John
+Hughes&lt;/a&gt; as a professor at  Chalmers University of Technology.
+He had however originally written it in 1984 as a post-doc.&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;p&gt;I wrote the paper in 1984 as a post-doc, but misjudged its significance completely.
+I thought it would be unpublishable, because it contained no difficult research results,
+just a manifesto and some nice programming examples. So I circulated it privately to friends,
+who passed it on to others, and soon I found it turning up in the most unexpected places.
+Finally, after five years, I was invited to submit it to the Computer Journal. &lt;a href=&quot;http://www.cse.chalmers.se/~rjmh/citations/my_most_influential_papers.htm&quot;&gt;link&lt;/a&gt;&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;h2&gt;&lt;a href=&quot;#how&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;how&quot;&gt;&lt;/a&gt;How&lt;/h2&gt;
+&lt;p&gt;As examples of the application of high-order functions and lazy-evaluation, the paper covers several
+topics:&lt;/p&gt;
+&lt;h3&gt;&lt;a href=&quot;#lists-and-trees-manipulation&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;lists-and-trees-manipulation&quot;&gt;&lt;/a&gt;Lists and Trees manipulation.&lt;/h3&gt;
+&lt;p&gt;Use of high-order functions and recursive patterns is used to illustrate how simple modularizations
+can be re-used to implement more complex functionality.&lt;/p&gt;
+&lt;h3&gt;&lt;a href=&quot;#numerical-algorithms&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;numerical-algorithms&quot;&gt;&lt;/a&gt;Numerical algorithms&lt;/h3&gt;
+&lt;p&gt;The Newton-Raphson Square Roots algorithm is implemented in a modular fashion using lazy
+evalaution.&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;p&gt;This program is indivisible in conventional languages. We will express it in a
+more modular form using lazy evaluation, and then show some other uses to
+which the parts may be put.&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;Numerical differentiation and integration implementations are also illustrated using lazy
+evaluation.&lt;/p&gt;
+&lt;h3&gt;&lt;a href=&quot;#alpha-beta-heuristic-an-ai-algorithm&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;alpha-beta-heuristic-an-ai-algorithm&quot;&gt;&lt;/a&gt;Alpha-beta heuristic, an AI algorithm&lt;/h3&gt;
+&lt;blockquote&gt;
+&lt;p&gt;We have argued that functional languages are powerful primarily because they
+provide two new kinds of glue: higher-order functions and lazy evaluation. In
+this section we take a larger example from Artificial Intelligence and show how
+it can be programmed quite simply using these two kinds of glue.&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;The paper implements the alpha-beta heurisitc, an algorithm for estimating how good a position a
+game player is in. The algorithm works by looking ahead to see how the game might develop, but
+avoids pursuing unprofitable plays. It's used to predict favourable positions.&lt;/p&gt;
+&lt;h2&gt;&lt;a href=&quot;#recap&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;recap&quot;&gt;&lt;/a&gt;Recap&lt;/h2&gt;
+&lt;p&gt;&amp;quot;Why Functional Programming Matters&amp;quot; argues that modularity is key to successful programming. It
+illustrates how functional programming eases modularisation and composability way
+better than conventional languages. To this end, it gives examples of lists and trees manipulation,
+numerical algorithms and an artificial intelligence algorithm applications.&lt;/p&gt;
+</content>
+
+        <author>
+            <name>Matt</name>
+        </author>
+    </entry>
+    
+    <entry>
+        <title>Python Context Managers</title>
+        <link rel="alternate" href="https://mattgathu.github.io/2017/02/06/python-context-managers.html" type="text/html" title="Python Context Managers" />
+        <published>2017-02-06T00:00:00+00:00</published>
+        <updated>2017-02-06T00:00:00+00:00</updated>
+        <id>https://mattgathu.github.io/2017/02/06/python-context-managers.html</id>
+        <content type="html" xml:base="https://mattgathu.github.io/2017/02/06/python-context-managers.html">&lt;h2&gt;&lt;a href=&quot;#what&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;what&quot;&gt;&lt;/a&gt;What&lt;/h2&gt;
+&lt;p&gt;A context manager, in Python, is a resource  acquisition and release mechanism that prevents
+resource leak and ensures startup and cleanup (exit) actions are always  done.&lt;/p&gt;
+&lt;p&gt;A resource is basically a computing component with limited availability e.g. files, network sockets
+etc. The act of refusing to release a resource when a process has finished using it is known as a
+&lt;em&gt;resource leak&lt;/em&gt;. An example would be leaving a file open after writing into it, thereby making it
+impossible for other processes to acquire it.&lt;/p&gt;
+&lt;h2&gt;&lt;a href=&quot;#why&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;why&quot;&gt;&lt;/a&gt;Why&lt;/h2&gt;
+&lt;p&gt;The main motivation behind context managers is to ease resource management by providing support
+for resource acquisition and release. This introduces to several advantages:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;eliminates the need of repeating resource acquisition/release code fragments: the DRY
+principle.&lt;/li&gt;
+&lt;li&gt;prevent errors arounds resource management.&lt;/li&gt;
+&lt;li&gt;eases code refactoring: this is a consequence of DRY principle.&lt;/li&gt;
+&lt;li&gt;makes resource cleanup easier: by guarranteeing startup (entry) and cleanup (exit) actions.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;&lt;a href=&quot;#whom-when-where&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;whom-when-where&quot;&gt;&lt;/a&gt;Whom, when, where&lt;/h2&gt;
+&lt;p&gt;Context managers became a feature of the Python standard library with the  acceptance of &lt;a href=&quot;https://www.python.org/dev/peps/pep-0343/&quot;&gt;PEP 343 --
+The &amp;quot;with&amp;quot; statement&lt;/a&gt; on 27 June 2005 and was implemented in a beta version of Python 2.5.&lt;/p&gt;
+&lt;p&gt;PEP 343, written by Guido van Rossum and Nick Coghlan, brought together ideas and concepts that had
+been proposed in other PEPs (that were rejected in favour of 343):&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a href=&quot;https://www.python.org/dev/peps/pep-0340/&quot;&gt;PEP 340&lt;/a&gt;, Anonymous Block Statements&lt;/li&gt;
+&lt;li&gt;&lt;a href=&quot;https://www.python.org/dev/peps/pep-0310/&quot;&gt;PEP 310&lt;/a&gt;, Reliable Acquisition/Release Pairs&lt;/li&gt;
+&lt;li&gt;&lt;a href=&quot;https://www.python.org/dev/peps/pep-0346/&quot;&gt;PEP 346&lt;/a&gt;, User Defined (&amp;quot;with&amp;quot;) Statements&lt;/li&gt;
+&lt;li&gt;&lt;a href=&quot;https://www.python.org/dev/peps/pep-0319/&quot;&gt;PEP 319&lt;/a&gt;, Python Synchronize/Asynchronize Block&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;A &lt;em&gt;with&lt;/em&gt; statement uses the syntax:&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-python&quot;&gt;with EXPR as VAR:
+    BLOCK
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;Where &lt;em&gt;with&lt;/em&gt; and &lt;em&gt;as&lt;/em&gt; are keywords, &lt;em&gt;EXPR&lt;/em&gt; is an arbitrary expression and &lt;em&gt;VAR&lt;/em&gt; is a single
+assignment target.&lt;/p&gt;
+&lt;h2&gt;&lt;a href=&quot;#how&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;how&quot;&gt;&lt;/a&gt;How&lt;/h2&gt;
+&lt;p&gt;A context manager is expected to implement &lt;em&gt;&lt;code&gt;__enter__()&lt;/code&gt;&lt;/em&gt; and &lt;em&gt;&lt;code&gt;__exit__()&lt;/code&gt;&lt;/em&gt; methods that are invoked on
+entry to and exit from the body of the &lt;em&gt;with&lt;/em&gt; statement. These methods are known as the &lt;em&gt;&amp;quot;context
+management protocol&amp;quot;&lt;/em&gt;.&lt;/p&gt;
+&lt;p&gt;The translation of the &lt;em&gt;with&lt;/em&gt; statement syntax is:&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-python&quot;&gt;mgr = (EXPR)
+exit = type(mgr).__exit__
+value = type(mgr).__enter__(mgr) # entry method invoked
+exc = True
+try:
+    try:
+        VAR = value  # Only if &amp;quot;as VAR&amp;quot; is present
+        BLOCK
+    except:
+        # The exceptional case is handled here
+        exc = False
+        if not exit(mgr, *sys.exc_info()):
+            raise
+        # The exception is swallowed if exit() returns true
+finally:
+    # The normal and non-local-goto cases are handled here
+    if exc:
+        exit(mgr, None, None, None) # exit method invoked
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;Example of a context manager would look like this:&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-python&quot;&gt;class Locked:
+    def __init__(self, lock):
+        self.lock = lock
+
+    def __enter__(self):
+        self.lock.acquire()
+
+    def __exit__(self, type, value, tb):
+        self.lock.release()
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;Where special state needs to be preserved, a generator-based template can be used:&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-python&quot;&gt;class GeneratorContextManager(object):
+
+    def __init__(self, gen):
+        self.gen = gen
+
+    def __enter__(self):
+        try:
+            return self.gen.next()
+        except StopIteration:
+            raise RuntimeError(&amp;quot;generator did not yield&amp;quot;)
+
+    def __exit__(self, type, value, traceback):
+        if type is None:
+            try:
+                self.gen.next()
+            except StopIteration:
+                return
+            else:
+                raise RuntimeError(&amp;quot;generator did not stop&amp;quot;)
+        else:
+            try:
+                self.gen.throw(type, value, traceback)
+                raise RuntimeError(&amp;quot;generator did not stop after throw()&amp;quot;)
+            except StopIteration:
+                return True
+            except:
+                if sys.exc_info()[1] is not value:
+                    raise
+
+class contextmanager(func):
+    def helper(*args, **kwargs):
+        return GeneratorContextManager(func(*args, **kwargs))
+    return helper
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;This decorator could be used as follows:&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-python&quot;&gt;@contextmanager
+def openfile(fname):
+    f = open(fname)
+    try:
+        yield f
+    finally:
+        f.close()
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;A robust implementation of this decorator is available as part of the &lt;a href=&quot;https://docs.python.org/3/library/contextlib.html&quot;&gt;contextlib&lt;/a&gt;
+module of the standard library which provides utilities for common tasks involving the &lt;code&gt;with&lt;/code&gt; statement.&lt;/p&gt;
+&lt;p&gt;Some types in the standard library can be identified as context managers, that is, they are already
+endowed with the &lt;code&gt;__enter__()&lt;/code&gt; and &lt;code&gt;__exit__()&lt;/code&gt; methods. They include:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;file&lt;/li&gt;
+&lt;li&gt;thread.LockType&lt;/li&gt;
+&lt;li&gt;threading.Lock&lt;/li&gt;
+&lt;li&gt;threading.RLock&lt;/li&gt;
+&lt;li&gt;threading.Condition&lt;/li&gt;
+&lt;li&gt;threading.Semaphore&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;Thus the Pythonic way of working with files is usually:&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-python&quot;&gt;with open('filename') as myfile:
+    do_something(myfile)
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;This ensures the file is closed after the &lt;code&gt;do_something&lt;/code&gt; block is exited.&lt;/p&gt;
+&lt;h2&gt;&lt;a href=&quot;#recap&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;recap&quot;&gt;&lt;/a&gt;Recap&lt;/h2&gt;
+&lt;p&gt;Python context managers are meant to make resource management painless, they are used in conjunction with the builtin &lt;code&gt;with&lt;/code&gt; statement. There were as a result of several Python Enhancement Proposals (PEPs) and there is a &lt;code&gt;contextlib&lt;/code&gt; module in the standard library that provides utilities for common context management tasks.&lt;/p&gt;
+</content>
+
+        <author>
+            <name>Matt</name>
+        </author>
+    </entry>
+    
+    <entry>
+        <title>Python Decorators Reuse</title>
+        <link rel="alternate" href="https://mattgathu.github.io/2015/04/26/python-decorators-code-reuse.html" type="text/html" title="Python Decorators Reuse" />
+        <published>2015-04-26T00:00:00+00:00</published>
+        <updated>2015-04-26T00:00:00+00:00</updated>
+        <id>https://mattgathu.github.io/2015/04/26/python-decorators-code-reuse.html</id>
+        <content type="html" xml:base="https://mattgathu.github.io/2015/04/26/python-decorators-code-reuse.html">&lt;p&gt;A python &lt;a href=&quot;https://docs.python.org/3.4/glossary.html#term-decorator&quot;&gt;decorator&lt;/a&gt;
+is a function (or class) that returns another function usually after applying
+some transformation to it. Common examples of decorators are classmethod() and
+staticmethod().&lt;/p&gt;
+&lt;p&gt;Decorators have a barrage of uses ranging from memoization, profiling, access
+control to function timeouts. There is a collection of these and other decorator
+code pieces &lt;a href=&quot;https://wiki.python.org/moin/PythonDecoratorLibrary&quot;&gt;here&lt;/a&gt;.&lt;/p&gt;
+&lt;p&gt;I have found myself mostly using decorators for retry and occasionally
+timeouts for network centric operations. Normally I would have a single
+decorator function that deals with particular exception and does several
+retries before re-raising the exception.&lt;/p&gt;
+&lt;p&gt;Here is an example.&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-python&quot;&gt;import time
+from functools import wraps
+from http.client import BadStatusLine
+
+def if_http_errors_retry(func):
+    &amp;quot;&amp;quot;&amp;quot;Decorator: retry calling function func in case of http.client errors.
+
+    Decorator will try to call, the function three times, with a ten seconds
+    delay between them. If the retries get maxed out, the decorator will raise
+    the http error.
+
+    args:
+        func (function): function to be decorated.
+
+    returns:
+        func (function): decorated function
+
+    &amp;quot;&amp;quot;&amp;quot;
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        &amp;quot;&amp;quot;&amp;quot;func wrapper&amp;quot;&amp;quot;&amp;quot;
+        error = Exception
+        for _ in range(3):
+            try:
+                return func(*args, **kwargs)
+            except BadStatusLine as err:
+                error = err
+                time.sleep(10)
+                continue
+        raise error
+
+    return wrapper
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;Looking keenly at the above decorator, you will realise that it bears some
+design flaws:&lt;/p&gt;
+&lt;p&gt;&lt;b&gt;You can't specify the amount of time delay: it's hard coded&lt;/b&gt;&lt;/p&gt;
+&lt;p&gt;&lt;b&gt;You can't specifiy the number of retries: it's hard coded&lt;/b&gt;&lt;/p&gt;
+&lt;p&gt;&lt;b&gt;It's hard to generalize the decorator for another exception without entirely
+duplicating it&lt;/b&gt;&lt;/p&gt;
+&lt;p&gt;After noting how much my code stinks I decided to refactor it and deal with the
+three issues above. The motivation for this mainly came when I saw this retry template.&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-python&quot;&gt;def auto_retry(n=3, exc=Exception):
+    for i in range(n):
+        try:
+            yield None
+            return
+            except exc, err:
+                # perhaps log exception here
+                continue
+    raise # re-raise the exception we caught earlier
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;It's not a decorator at all but it had all the three qualities that my decorator
+lacked and it gave me a basis for me to start exploring.&lt;/p&gt;
+&lt;p&gt;It turns out refactoring the decorator was pretty easy.&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-python&quot;&gt;import time
+from functools import wraps
+from http.client import BadStatusLine
+
+def auto_retry(tries=3, exc=Exception, delay=5):
+    def deco(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            for _ in range(tries):
+                try:
+                    return func(*args, **kwargs)
+                except exc:
+                    time.sleep(delay)
+                    continue
+            raise exc
+        return wrapper
+    return deco
+
+# decorating
+
+@auto_retry(tries=3, exc=BadStatusLine, delay=5)
+def network_call():
+    # some code using http.client
+
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;Voila, now I have a very flexible retry decorator that can  be applied on any
+type of exception, time delay and number of retries.&lt;/p&gt;
+&lt;p&gt;The key to achieving this is having a function (auto_retry) that returns a
+decorator function (deco) which will in turn decorates a function (func).
+Thanks to the power of &lt;a href=&quot;http://en.wikipedia.org/wiki/Closure_(computer_programming&quot;&gt;closures&lt;/a&gt; the parameters passed to the high order
+function (auto_retry) are also available to the nested functions and are
+used for the control flow within them.&lt;/p&gt;
+</content>
+
+        <author>
+            <name>Matt</name>
+        </author>
+    </entry>
+    
+</feed>

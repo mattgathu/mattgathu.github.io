@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Python Decorators Reuse | Matt Gathu</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="description" content="Matt Gathu's Blog">
+     <!-- Twitter card -->
+ <meta name="twitter:card" content="summary">
+ <meta name="twitter:site" content="@swissgathu">
+ <meta name="twitter:creator" content="@swissgathu">
+ <meta name="twitter:title" content="Python Decorators Reuse | Matt Gathu">
+ <meta name="twitter:description" content="matt gathu blog">
+
+
+<!-- fonts -->
+
+
+<!-- styles -->
+<link rel="stylesheet" href="/styles/vendor.css"/>
+<link rel="stylesheet" href="/styles/fonts.css"/>
+<link rel="stylesheet" href="/styles/app.css"/>
+<link rel="stylesheet" href="/styles/highlight.css"/>
+
+<!-- favicon -->
+<link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16.png">
+<link rel="shortcut icon" href="/images/favicon.ico">
+<link rel="manifest" href="/images/site.webmanifest">
+<link rel="mask-icon" href="/images/safari-pinned-tab.svg" color="#5bbad5">
+<meta name="msapplication-TileColor" content="#00aba9">
+<meta name="theme-color" content="#ffffff">
+
+ <!-- atom -->
+ <link type="application/atom+xml" rel="alternate" href="https://mattgathu.github.io/feed.xml" title="Matt Gathu" />
+
+  </head>
+  <body>
+    <nav class="flex flex-row justify-center justify-end-l items-center flex-wrap ph2 pl3-ns pr4-ns">
+  <div class="brand flex-auto w-100 w-auto-l self-start tc tl-l">
+    <a href="/">
+      <span class="dib ml1 ml0-l">Matt Gathu</span>
+    </a>
+  </div>
+
+</nav>
+
+<section id="Python Decorators Reuse" class="white">
+  <div class="w-100 mw-none ph3 mw8-m mw8-l center f3">
+    <header>
+      <h2>Python Decorators Reuse</h2>
+      
+    </header>
+
+    <div class="publish-date-author">Apr. 26, 2015 &middot; Matt
+    </div>
+
+    <div class="post">
+      <p>A python <a href="https://docs.python.org/3.4/glossary.html#term-decorator">decorator</a>
+is a function (or class) that returns another function usually after applying
+some transformation to it. Common examples of decorators are classmethod() and
+staticmethod().</p>
+<p>Decorators have a barrage of uses ranging from memoization, profiling, access
+control to function timeouts. There is a collection of these and other decorator
+code pieces <a href="https://wiki.python.org/moin/PythonDecoratorLibrary">here</a>.</p>
+<p>I have found myself mostly using decorators for retry and occasionally
+timeouts for network centric operations. Normally I would have a single
+decorator function that deals with particular exception and does several
+retries before re-raising the exception.</p>
+<p>Here is an example.</p>
+<pre><code class="language-python">import time
+from functools import wraps
+from http.client import BadStatusLine
+
+def if_http_errors_retry(func):
+    &quot;&quot;&quot;Decorator: retry calling function func in case of http.client errors.
+
+    Decorator will try to call, the function three times, with a ten seconds
+    delay between them. If the retries get maxed out, the decorator will raise
+    the http error.
+
+    args:
+        func (function): function to be decorated.
+
+    returns:
+        func (function): decorated function
+
+    &quot;&quot;&quot;
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        &quot;&quot;&quot;func wrapper&quot;&quot;&quot;
+        error = Exception
+        for _ in range(3):
+            try:
+                return func(*args, **kwargs)
+            except BadStatusLine as err:
+                error = err
+                time.sleep(10)
+                continue
+        raise error
+
+    return wrapper
+</code></pre>
+<p>Looking keenly at the above decorator, you will realise that it bears some
+design flaws:</p>
+<p><b>You can't specify the amount of time delay: it's hard coded</b></p>
+<p><b>You can't specifiy the number of retries: it's hard coded</b></p>
+<p><b>It's hard to generalize the decorator for another exception without entirely
+duplicating it</b></p>
+<p>After noting how much my code stinks I decided to refactor it and deal with the
+three issues above. The motivation for this mainly came when I saw this retry template.</p>
+<pre><code class="language-python">def auto_retry(n=3, exc=Exception):
+    for i in range(n):
+        try:
+            yield None
+            return
+            except exc, err:
+                # perhaps log exception here
+                continue
+    raise # re-raise the exception we caught earlier
+</code></pre>
+<p>It's not a decorator at all but it had all the three qualities that my decorator
+lacked and it gave me a basis for me to start exploring.</p>
+<p>It turns out refactoring the decorator was pretty easy.</p>
+<pre><code class="language-python">import time
+from functools import wraps
+from http.client import BadStatusLine
+
+def auto_retry(tries=3, exc=Exception, delay=5):
+    def deco(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            for _ in range(tries):
+                try:
+                    return func(*args, **kwargs)
+                except exc:
+                    time.sleep(delay)
+                    continue
+            raise exc
+        return wrapper
+    return deco
+
+# decorating
+
+@auto_retry(tries=3, exc=BadStatusLine, delay=5)
+def network_call():
+    # some code using http.client
+
+</code></pre>
+<p>Voila, now I have a very flexible retry decorator that can  be applied on any
+type of exception, time delay and number of retries.</p>
+<p>The key to achieving this is having a function (auto_retry) that returns a
+decorator function (deco) which will in turn decorates a function (func).
+Thanks to the power of <a href="http://en.wikipedia.org/wiki/Closure_(computer_programming">closures</a> the parameters passed to the high order
+function (auto_retry) are also available to the nested functions and are
+used for the control flow within them.</p>
+
+    </div>
+  </div>
+</section>
+
+    
+<!-- scripts -->
+<script src="/scripts/highlight.js"></script>
+
+  </body>
+</html>

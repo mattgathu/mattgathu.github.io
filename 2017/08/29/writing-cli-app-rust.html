@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Writing a Command Line Tool in Rust | Matt Gathu</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="description" content="Matt Gathu's Blog">
+     <!-- Twitter card -->
+ <meta name="twitter:card" content="summary">
+ <meta name="twitter:site" content="@swissgathu">
+ <meta name="twitter:creator" content="@swissgathu">
+ <meta name="twitter:title" content="Writing a Command Line Tool in Rust | Matt Gathu">
+ <meta name="twitter:description" content="matt gathu blog">
+
+
+<!-- fonts -->
+
+
+<!-- styles -->
+<link rel="stylesheet" href="/styles/vendor.css"/>
+<link rel="stylesheet" href="/styles/fonts.css"/>
+<link rel="stylesheet" href="/styles/app.css"/>
+<link rel="stylesheet" href="/styles/highlight.css"/>
+
+<!-- favicon -->
+<link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16.png">
+<link rel="shortcut icon" href="/images/favicon.ico">
+<link rel="manifest" href="/images/site.webmanifest">
+<link rel="mask-icon" href="/images/safari-pinned-tab.svg" color="#5bbad5">
+<meta name="msapplication-TileColor" content="#00aba9">
+<meta name="theme-color" content="#ffffff">
+
+ <!-- atom -->
+ <link type="application/atom+xml" rel="alternate" href="https://mattgathu.github.io/feed.xml" title="Matt Gathu" />
+
+  </head>
+  <body>
+    <nav class="flex flex-row justify-center justify-end-l items-center flex-wrap ph2 pl3-ns pr4-ns">
+  <div class="brand flex-auto w-100 w-auto-l self-start tc tl-l">
+    <a href="/">
+      <span class="dib ml1 ml0-l">Matt Gathu</span>
+    </a>
+  </div>
+
+</nav>
+
+<section id="Writing a Command Line Tool in Rust" class="white">
+  <div class="w-100 mw-none ph3 mw8-m mw8-l center f3">
+    <header>
+      <h2>Writing a Command Line Tool in Rust</h2>
+      
+    </header>
+
+    <div class="publish-date-author">Aug. 29, 2017 &middot; Matt
+    </div>
+
+    <div class="post">
+      <p><img src="/images/cli.png" alt="cli-help-menu" /></p>
+<h2><a href="#what" aria-hidden="true" class="anchor" id="what"></a>What</h2>
+<p><a href="https://www.rust-lang.org/en-US/">Rust</a> is a systems programming language that enables you to
+write fast, safe and concurrent code. It fits in the same niche as C and C++ but provides a fresh
+breath of features and convenience that makes writing programs in it fun.</p>
+<p><a href="https://en.wikipedia.org/wiki/Command-line_interface">Command Line Tools</a> are programs designed to
+be executed in a terminal (command line) interface. They are synonymous with Unix programming where
+they are often called shell tools. An example is the <code>ls</code> command used to list directories.</p>
+<p>We are going to cover how to write a command line tool using Rust by writing a simple clone of the
+popular <code>wget</code> tool used for file downloads.</p>
+<h2><a href="#why" aria-hidden="true" class="anchor" id="why"></a>Why</h2>
+<p>The aim here is to get started writing command line tools in Rust programming language also use some wonderful
+crates (community libraries) that make writing CLI programs a breeze.</p>
+<h2><a href="#how" aria-hidden="true" class="anchor" id="how"></a>How</h2>
+<p>Our simple <code>wget</code> clone will have the following features which a desirable in a command line tool:</p>
+<ul>
+<li><strong>Argument parsing</strong></li>
+<li><strong>Colored Output</strong></li>
+<li><strong>Progress bar</strong></li>
+</ul>
+<h3><a href="#project-setup" aria-hidden="true" class="anchor" id="project-setup"></a>Project Setup</h3>
+<p>We use rust's build tool (and package manager)
+<a href="https://doc.rust-lang.org/book/second-edition/ch01-02-hello-world.html#hello-cargo">Cargo</a> to setup our project skeleton.</p>
+<pre><code class="language-bash">cargo new rget --bin
+</code></pre>
+<p>This creates a new project called <code>rget</code> and the <code>--bin</code> option tells cargo we are building an
+executable and not a library. A folder is generated with the following structure.</p>
+<pre><code class="language-bash">$ cd rget
+$ tree .
+.
+├── Cargo.toml
+└── src
+    └── main.rs
+
+1 directory, 2 files
+</code></pre>
+<p><code>Cargo.toml</code> is a manifest file and our code will live under the <code>src</code> directory, in <code>main.rs</code></p>
+<h3><a href="#argument-parsing" aria-hidden="true" class="anchor" id="argument-parsing"></a>Argument Parsing</h3>
+<p>We will use the <a href="https://crates.io/crates/clap">clap</a> crate for parsing command line arguments. We
+add to our project by updating cargo's manifest file dependecies section.</p>
+<pre><code class="language-toml">[package]
+name = &quot;rget&quot;
+version = &quot;0.1.0&quot;
+authors = [&quot;Matt Gathu &lt;mattgathu@gmail.com&gt;&quot;]
+
+[dependencies]
+clap = &quot;2.26.0&quot;
+</code></pre>
+<p>We then update our <strong>main</strong> function in <code>main.rs</code> to perform argument parsing.</p>
+<pre><code class="language-rust">extern crate clap;
+
+use clap::{Arg, App};
+
+fn main() {
+    let matches = App::new(&quot;Rget&quot;)
+        .version(&quot;0.1.0&quot;)
+        .author(&quot;Matt Gathu &lt;mattgathu@gmail.com&gt;&quot;)
+        .about(&quot;wget clone written in Rust&quot;)
+        .arg(Arg::with_name(&quot;URL&quot;)
+                 .required(true)
+                 .takes_value(true)
+                 .index(1)
+                 .help(&quot;url to download&quot;))
+        .get_matches();
+    let url = matches.value_of(&quot;URL&quot;).unwrap();
+    println!(&quot;{}&quot;, url);
+}
+</code></pre>
+<p>We can now test our argument parser using Cargo.</p>
+<p><code>cargo run</code></p>
+<pre><code class="language-bash">    Finished dev [unoptimized + debuginfo] target(s) in 0.0 secs
+     Running `target/debug/rget`
+error: The following required arguments were not provided:
+    &lt;URL&gt;
+
+USAGE:
+    rget &lt;URL&gt;
+
+For more information try --help
+</code></pre>
+<p>We can pass arguments to our program by adding <code>--</code> when calling <code>cargo run</code></p>
+<p><code>cargo run -- -h</code></p>
+<pre><code class="language-bash">    Finished dev [unoptimized + debuginfo] target(s) in 0.0 secs
+     Running `target/debug/rget -h`
+Rget 0.1.0
+Matt Gathu &lt;mattgathu@gmail.com&gt;
+wget clone written in Rust
+
+USAGE:
+    rget &lt;URL&gt;
+
+FLAGS:
+    -h, --help       Prints help information
+    -V, --version    Prints version information
+
+ARGS:
+    &lt;URL&gt;    url to download
+</code></pre>
+<h3><a href="#progress-bar-and-colored-output" aria-hidden="true" class="anchor" id="progress-bar-and-colored-output"></a>Progress bar and colored output</h3>
+<p><a href="https://crates.io/crates/indicatif">indicatif</a> is a rust library for indicating
+progress in command line applications. We use it to implement a progress bar and a spinner for our wget clone.</p>
+<p>indicatif relies on another crate, <a href="https://crates.io/crates/console">console</a> and uses it for colored output.
+we'll always leverage console and use it to print out colored text.</p>
+<p>Below is the function for creating the progress bar:</p>
+<pre><code class="language-rust">fn create_progress_bar(quiet_mode: bool, msg: &amp;str, length: Option&lt;u64&gt;) -&gt; ProgressBar {
+    let bar = match quiet_mode {
+        true =&gt; ProgressBar::hidden(),
+        false =&gt; {
+            match length {
+                Some(len) =&gt; ProgressBar::new(len),
+                None =&gt; ProgressBar::new_spinner(),
+            }
+        }
+    };
+
+    bar.set_message(msg);
+    match length.is_some() {
+        true =&gt; bar
+            .set_style(ProgressStyle::default_bar()
+                .template(&quot;{msg} {spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} eta: {eta}&quot;)
+                .progress_chars(&quot;=&gt; &quot;)),
+        false =&gt; bar.set_style(ProgressStyle::default_spinner()),
+    };
+
+    bar
+}
+</code></pre>
+<p>The function has several arguments and creates a progress bar based on their value. We use Rust's
+<a href="https://doc.rust-lang.org/book/second-edition/ch06-02-match.html">pattern matching</a> feature to
+match the arguments to the desired progress bar.</p>
+<h3><a href="#cloning-wgets-logic" aria-hidden="true" class="anchor" id="cloning-wgets-logic"></a>Cloning wget's logic</h3>
+<p>We use the <a href="https://crates.io/crates/reqwest">reqwest</a> crate for implement file download function
+that receives a url and downloads it into a local file.</p>
+<p>The download function will also update the progress bar when each chunk of the file is downloaded
+and also print out colored text with the download's metadata. This behaviour will be similar to
+wget's.</p>
+<p>Here's a code snippet showing the download function:</p>
+<pre><code class="language-rust">fn download(target: &amp;str, quiet_mode: bool) -&gt; Result&lt;(), Box&lt;::std::error::Error&gt;&gt; {
+
+    // parse url
+    let url = parse_url(target)?;
+    let client = Client::new().unwrap();
+    let mut resp = client.get(url)?
+        .send()
+        .unwrap();
+    print(format!(&quot;HTTP request sent... {}&quot;,
+                  style(format!(&quot;{}&quot;, resp.status())).green()),
+          quiet_mode);
+    if resp.status().is_success() {
+
+        let headers = resp.headers().clone();
+        let ct_len = headers.get::&lt;ContentLength&gt;().map(|ct_len| **ct_len);
+
+        let ct_type = headers.get::&lt;ContentType&gt;().unwrap();
+
+        match ct_len {
+            Some(len) =&gt; {
+                print(format!(&quot;Length: {} ({})&quot;,
+                      style(len).green(),
+                      style(format!(&quot;{}&quot;, HumanBytes(len))).red()),
+                    quiet_mode);
+            },
+            None =&gt; {
+                print(format!(&quot;Length: {}&quot;, style(&quot;unknown&quot;).red()), quiet_mode); 
+            },
+        }
+
+        print(format!(&quot;Type: {}&quot;, style(ct_type).green()), quiet_mode);
+
+        let fname = target.split(&quot;/&quot;).last().unwrap();
+
+        print(format!(&quot;Saving to: {}&quot;, style(fname).green()), quiet_mode);
+
+        let chunk_size = match ct_len {
+            Some(x) =&gt; x as usize / 99,
+            None =&gt; 1024usize, // default chunk size
+        };
+
+        let mut buf = Vec::new();
+
+        let bar = create_progress_bar(quiet_mode, fname, ct_len);
+
+        loop {
+            let mut buffer = vec![0; chunk_size];
+            let bcount = resp.read(&amp;mut buffer[..]).unwrap();
+            buffer.truncate(bcount);
+            if !buffer.is_empty() {
+                buf.extend(buffer.into_boxed_slice()
+                               .into_vec()
+                               .iter()
+                               .cloned());
+                bar.inc(bcount as u64);
+            } else {
+                break;
+            }
+        }
+
+        bar.finish();
+
+        save_to_file(&amp;mut buf, fname)?;
+    }
+
+    Ok(())
+
+}
+</code></pre>
+<p>The <code>download</code> function takes a target url, parses it to generate a filename and uses the
+<code>Content-Length</code> HTTP header to determine the size of the file. It generates a colored progress bar and
+downloads the file in chunks. Once each chunk is received, the progress bar is updated to show
+progress.</p>
+<p>Once the full download is complete, the file contents are save to a file.</p>
+<h2><a href="#recap" aria-hidden="true" class="anchor" id="recap"></a>Recap</h2>
+<p>Writing CLI tools in Rust is quite easy. Argument parsing can be done using the <code>clap</code> crate,
+progress bars generated using the <code>indicatif</code> crate and colored output using the <code>console</code> crate.
+The <code>cargo</code> build tool also makes it a breeze to build and run our code.</p>
+<p>You can find the full implementation of the <code>wget</code> clone my <a href="https://github.com/mattgathu/rget">github</a>.</p>
+
+    </div>
+  </div>
+</section>
+
+    
+<!-- scripts -->
+<script src="/scripts/highlight.js"></script>
+
+  </body>
+</html>
