@@ -10,7 +10,7 @@
         <name>Maintained by matt gathu.</name>
         <uri>https://github.com/mattgathu</uri>
     </author>
-    <updated>2020-04-24T22:24:59.409633+00:00</updated>
+    <updated>2020-04-24T22:35:15.525204+00:00</updated>
 
     
     <entry>
@@ -1552,7 +1552,7 @@ that you can check out:&lt;/p&gt;
         <updated>2017-10-01T00:00:00+00:00</updated>
         <id>https://mattgathu.github.io/2017/10/01/testing-rust-cli-apps.html</id>
         <content type="html" xml:base="https://mattgathu.github.io/2017/10/01/testing-rust-cli-apps.html">&lt;p&gt;&lt;img src=&quot;/images/cargo_test.png&quot; alt=&quot;cargo-tests-results&quot; /&gt;&lt;/p&gt;
-&lt;p&gt;Recently I wrote a post on &lt;a href=&quot;http://mattgathu.github.io/writing-cli-app-rust/&quot;&gt;how to write a CLI application using Rust&lt;/a&gt;. This is a follow up post
+&lt;p&gt;Recently I wrote a post on &lt;a href=&quot;2017/08/29/writing-cli-app-rust.html&quot;&gt;how to write a CLI application using Rust&lt;/a&gt;. This is a follow up post
 exploring how to test CLI applications and integrating tests with Cargo, Rust's build tool.&lt;/p&gt;
 &lt;h2&gt;&lt;a href=&quot;#what&quot; aria-hidden=&quot;true&quot; class=&quot;anchor&quot; id=&quot;what&quot;&gt;&lt;/a&gt;What&lt;/h2&gt;
 &lt;p&gt;Cargo has builtin support for running both unit and integration tests. It also generates

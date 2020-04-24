@@ -13,7 +13,7 @@ author: Matt
 
 ![cargo-tests-results][cargo-test]
 
-Recently I wrote a post on [how to write a CLI application using Rust](http://mattgathu.github.io/writing-cli-app-rust/). This is a follow up post
+Recently I wrote a post on [how to write a CLI application using Rust][writing-cli-app-rust]. This is a follow up post
 exploring how to test CLI applications and integrating tests with Cargo, Rust's build tool.
 
 ## What
@@ -220,3 +220,4 @@ providing a testing oriented interface that makes it easy to read and reason abo
 
 
 [cargo-test]: /images/cargo_test.png
+[writing-cli-app-rust]: 2017/08/29/writing-cli-app-rust.html
