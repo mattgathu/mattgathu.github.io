@@ -220,4 +220,4 @@ providing a testing oriented interface that makes it easy to read and reason abo
 
 
 [cargo-test]: /images/cargo_test.png
-[writing-cli-app-rust]: 2017/08/29/writing-cli-app-rust.html
+[writing-cli-app-rust]: http://mattgathu.github.io/2017/08/29/writing-cli-app-rust.html
