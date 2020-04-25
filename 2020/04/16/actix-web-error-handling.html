@@ -190,8 +190,8 @@ async fn main() -&gt; std::io::Result&lt;()&gt; {
 <p>We use the excellent <a href="https://docs.rs/thiserror/1.0.15/thiserror/">thiserror</a> crate to derive the <code>Error</code> trait for our <code>CustomError</code> enum.</p>
 <p>We then implement the <code>ResponseError</code> trait for CustomError and map the io Errors.</p>
 <p>We change the request handler's return type from <code>Result&lt;HttpResponse, Error&gt;</code> to <code>Result&lt;HttpResponse, CustomError&gt;</code>
-and this ensures the all the errors returned are part of our CustomError enum. This return type constraining is
-what guarantees that we never leak the service internals to the client when an error occurs.</p>
+and this ensures the all the errors returned are part of our CustomError enum. <strong>This return type constraining is
+what guarantees that we never leak the service internals to the client when an error occurs.</strong></p>
 <p>Skipping the <code>map_err</code> on one of the io errors will result in a compilation error:</p>
 <pre><code>`?` couldn't convert the error to `CustomError`
 

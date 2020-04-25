@@ -10,7 +10,7 @@
         <name>Maintained by matt gathu.</name>
         <uri>https://github.com/mattgathu</uri>
     </author>
-    <updated>2020-04-24T22:39:09.293673+00:00</updated>
+    <updated>2020-04-25T06:59:13.792038+00:00</updated>
 
     
     <entry>
@@ -151,8 +151,8 @@ async fn main() -&amp;gt; std::io::Result&amp;lt;()&amp;gt; {
 &lt;p&gt;We use the excellent &lt;a href=&quot;https://docs.rs/thiserror/1.0.15/thiserror/&quot;&gt;thiserror&lt;/a&gt; crate to derive the &lt;code&gt;Error&lt;/code&gt; trait for our &lt;code&gt;CustomError&lt;/code&gt; enum.&lt;/p&gt;
 &lt;p&gt;We then implement the &lt;code&gt;ResponseError&lt;/code&gt; trait for CustomError and map the io Errors.&lt;/p&gt;
 &lt;p&gt;We change the request handler's return type from &lt;code&gt;Result&amp;lt;HttpResponse, Error&amp;gt;&lt;/code&gt; to &lt;code&gt;Result&amp;lt;HttpResponse, CustomError&amp;gt;&lt;/code&gt;
-and this ensures the all the errors returned are part of our CustomError enum. This return type constraining is
-what guarantees that we never leak the service internals to the client when an error occurs.&lt;/p&gt;
+and this ensures the all the errors returned are part of our CustomError enum. &lt;strong&gt;This return type constraining is
+what guarantees that we never leak the service internals to the client when an error occurs.&lt;/strong&gt;&lt;/p&gt;
 &lt;p&gt;Skipping the &lt;code&gt;map_err&lt;/code&gt; on one of the io errors will result in a compilation error:&lt;/p&gt;
 &lt;pre&gt;&lt;code&gt;`?` couldn't convert the error to `CustomError`
 

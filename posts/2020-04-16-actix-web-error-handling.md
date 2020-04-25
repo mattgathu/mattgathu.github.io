@@ -157,8 +157,8 @@ We use the excellent [thiserror][6] crate to derive the `Error` trait for our `C
 We then implement the `ResponseError` trait for CustomError and map the io Errors.
 
 We change the request handler's return type from `Result<HttpResponse, Error>` to `Result<HttpResponse, CustomError>`
-and this ensures the all the errors returned are part of our CustomError enum. This return type constraining is
-what guarantees that we never leak the service internals to the client when an error occurs.
+and this ensures the all the errors returned are part of our CustomError enum. **This return type constraining is
+what guarantees that we never leak the service internals to the client when an error occurs.**
 
 Skipping the `map_err` on one of the io errors will result in a compilation error:
 
