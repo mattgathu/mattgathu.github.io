@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en">
-    <generator uri="https://mattgathu.github.io/" version="0.1.0">Matt Gathu</generator>
+    <generator uri="https://mattgathu.github.io/" version="0.1.0">MG</generator>
     <link href="https://mattgathu.github.io/feed.xml" rel="self" type="application/atom+xml" />
     <link href="https://mattgathu.github.io/" rel="alternate" type="text/html" />
     <id>https://mattgathu.github.io/</id>
-    <title>Matt Gathu</title>
-    <subtitle>matt gathu blog</subtitle>
+    <title>MG</title>
+    <subtitle>mg</subtitle>
     <author>
-        <name>Maintained by matt gathu.</name>
+        <name>Maintained by mg.</name>
         <uri>https://github.com/mattgathu</uri>
     </author>
-    <updated>2020-04-25T07:20:31.391298+00:00</updated>
+    <updated>2020-04-25T18:01:06.751226+00:00</updated>
 
     
     <entry>

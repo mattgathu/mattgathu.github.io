@@ -132,7 +132,7 @@ ul, ol {
   padding-left: 1.2em; }
 
 .posts {
-  min-height: 80vh;
+  min-height: 100vh;
   background-color: #2a3439;
   color: white; }
   .posts .highlight {
